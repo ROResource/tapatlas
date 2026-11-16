@@ -692,13 +692,13 @@ async function buildAtlas() {
     doc.text('the previous/next slice and, where present, the previous/next annotated slice.', 20, H - 11.5);
     // attribution
     doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(...DIM);
-    const wm1 = 'Created with ', wm2 = 'ROCAG';
+    const wm1 = 'Created with ', wm2 = 'TapAtlas';
     doc.setFont('helvetica', 'bold'); const w2 = doc.getTextWidth(wm2); doc.setFont('helvetica', 'normal'); const w1 = doc.getTextWidth(wm1);
     const wx = W - 14 - w1 - w2;
     doc.text(wm1, wx, 12); doc.setFont('helvetica', 'bold'); doc.setTextColor(...ACC); doc.text(wm2, wx + w1, 12);
     doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); doc.setTextColor(...DIM);
-    doc.text('Radiation Oncology Contour Atlas Generator', W - 14, 15.5, {align: 'right'});
-    doc.link(wx - 1, 8.5, W - 14 - wx + 1, 8.5, {url: ROCAG_URL});
+    doc.text('The Radiotherapy Contour Atlas Generator', W - 14, 15.5, {align: 'right'});
+    doc.link(wx - 1, 8.5, W - 14 - wx + 1, 8.5, {url: TAPATLAS_URL});
   }
   // ---- legend pages ----
   legendPages.forEach((items, li) => {
@@ -880,8 +880,8 @@ async function buildPptx() {
       }
       s.addText(`${incRois.length} structures, ${notePages.length} annotated slides, ${total} slides. Buttons work in slide-show mode.`,
         {x: 0.6, y: L.H - 0.55, w: L.W - 1.2, h: 0.3, fontFace: FONT, fontSize: 9, color: DIM, margin: 0});
-      s.addText([{text: 'Created with ', options: {color: DIM}}, {text: 'ROCAG', options: {color: ACC, bold: true, hyperlink: {url: ROCAG_URL, tooltip: 'Radiation Oncology Contour Atlas Generator'}}},
-                 {text: '\nRadiation Oncology Contour Atlas Generator', options: {color: DIM, fontSize: 7}}],
+      s.addText([{text: 'Created with ', options: {color: DIM}}, {text: 'TapAtlas', options: {color: ACC, bold: true, hyperlink: {url: TAPATLAS_URL, tooltip: 'The Radiotherapy Contour Atlas Generator'}}},
+                 {text: '\nThe Radiotherapy Contour Atlas Generator', options: {color: DIM, fontSize: 7}}],
         {x: L.W - 3.6, y: 0.25, w: 3.3, h: 0.45, fontFace: FONT, fontSize: 9, align: 'right', valign: 'top', margin: 0});
     }
     // ---- legend slides ----

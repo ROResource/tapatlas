@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>ROCAG · Radiation Oncology Contour Atlas Generator</title>
+<title>TapAtlas · The Radiotherapy Contour Atlas Generator</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="description" content="Build navigable PDF and PowerPoint contouring atlases from DICOM CT, structures, registered scans and dose, entirely in the browser.">
 <link rel="preconnect" href="https://api.fontshare.com">
@@ -57,7 +57,7 @@ kbd{font:600 11px var(--font);background:var(--surface-3);border:1px solid var(-
 /* ---------- header ---------- */
 header.top{height:var(--head-h);display:flex;align-items:center;gap:var(--s6);padding:0 var(--s5);border-bottom:1px solid var(--border);background:var(--surface)}
 .brand{display:flex;align-items:center;gap:var(--s3);min-width:0}
-.brand .mark{font-weight:700;font-size:var(--t-lg);letter-spacing:.08em;color:var(--accent-ink);background:var(--accent);padding:3px 9px;border-radius:5px}
+.brand .mark{font-weight:700;font-size:var(--t-lg);letter-spacing:-.01em;color:var(--accent-ink);background:var(--accent);padding:3px 10px;border-radius:5px}
 .brand .bt{font-weight:600;font-size:var(--t-md);white-space:nowrap}
 .brand .bs{font-size:var(--t-xs);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .brand>div{min-width:0}
@@ -287,8 +287,8 @@ fieldset.sec label{margin-right:var(--s3)}
 <body>
 <header class="top">
   <div class="brand">
-    <span class="mark" aria-label="ROCAG">ROCAG</span>
-    <div><div class="bt">Radiation Oncology Contour Atlas Generator</div>
+    <span class="mark" aria-label="TapAtlas" title="TapAtlas: from the Irish tapa, quick">TapAtlas</span>
+    <div><div class="bt">The Radiotherapy Contour Atlas Generator</div>
       <div class="bs">Turn DICOM CT, structures, registered scans and dose into a linked PDF or PowerPoint atlas. Runs in your browser.</div></div>
   </div>
   <ol class="steps"><li id="step1" class="on">Import</li><li id="step2">Review &amp; annotate</li><li id="step3">Create atlas</li></ol>

@@ -1,6 +1,6 @@
-// ===================== ROCAG interface wiring =====================
+// ===================== TapAtlas interface wiring =====================
 // Layout-only behaviour: dialogs, pickers, side panel sections, full screen, scan list, step indicator.
-const ROCAG_URL = 'https://roresource.github.io/rocag/';
+const TAPATLAS_URL = 'https://roresource.github.io/tapatlas/';
 
 // file pickers: a styled button opens the hidden <input type=file>; the chosen file count/name is shown
 function wirePickers(root) {
