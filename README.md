@@ -1,19 +1,8 @@
-# RT DICOM Pyodide test
+# ROCAG · Radiation Oncology Contour Atlas Generator
 
-Bare-bones prototype: loads a CT series + RTSTRUCT in the browser using Pyodide + pydicom and draws all structures on the CT slices. Files are read locally and never uploaded.
+Build navigable contouring atlases (PDF and PowerPoint) from DICOM: planning CT + RTSTRUCT, registered MR/CT scans (REG), and RTDOSE/RTPLAN.
+Everything runs in the browser (Pyodide + pydicom); no files are uploaded.
 
-## Secondary + REG
-Load a secondary image series (MR/CT/PET) and a DICOM REG file. The secondary is resampled (trilinear) onto the primary CT grid using the registration matrix, so the RTSTRUCT contours overlay both. Press T to toggle. Deformable REG: only the rigid pre/post matrices are applied.
+**Open the app:** https://roresource.github.io/rocag/
 
-## Planes + structures
-Axial / sagittal / coronal reconstructions on the primary grid (A/S/C keys); click to move the crosshair. Secondary is resampled into each plane. Sagittal/coronal structure outlines are built from the axial contours (even-odd fill of plane crossings per slice, traced with d3.contours). Per-structure show/hide, colour and rename (names kept for the upcoming PDF export); global line width.
-
-## Multiple scans + crop
-Up to 4 extra scans (5 total). Every loaded REG is added to a frame-of-reference graph, so a scan can be registered to the CT directly or to another loaded scan (e.g. MR2 -> MR1 -> CT); status shows the path or flags it as unregistered. Secondaries are stored float16 to fit several in memory, and uneven slice spacing is handled using each slice's own position.
-Crop (applies to every scan and plane): Auto (body, couch excluded; applied on load), to visible structures + margin, or drag a box on any plane. Reset restores the full grid.
-
-## Scan names + notes
-Every scan has an editable display name (used in the viewer and, later, the PDF). Notes: "+ Add note", click the point, then click where the text box goes, and type. Each note belongs to one scan + plane + slice. Drag the box header or the dot to reposition; positions are stored in image coordinates so they stay put when cropping or resizing. The notes list jumps to any note.
-
-## Atlas PDF (atlas.js)
-"Build atlas PDF…" opens the builder: title/creator; a separate volume-of-interest box per plane (drag/resize on axial, sagittal and coronal thumbnails; defaults to the current crop) with every-Nth-slice spacing; scans to include with names, W/L and planes; extra CT windows (lung/bone/...); structures (default = visible); notes (annotated slices are always included); optional legend page with structure descriptions. Output (jsPDF, in the browser): title page with linked contents, legend, then one slice per page (axial superior->inferior, sagittal R->L, coronal A->P) for each scan. Every page links to the same slice on the other scans, to the other planes, previous/next slice and previous/next annotated slice.
+The earlier prototype is kept at https://github.com/ROResource/rt-dicom-pyodide-test.

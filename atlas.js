@@ -156,15 +156,16 @@ function atlasRender() {
   const A = atlas, dlg = $('atlasDlg');
   const incRois = rois.filter(r => A.roiOn[r.number]);
   dlg.innerHTML = `<div class="panel">
-  <h3 style="margin-top:0">Build atlas PDF</h3>
+  <button class="ghost x" id="aX" aria-label="Close">×</button>
+  <h3>Create atlas</h3>
+  <p class="sub">Work down the steps, then build a PDF or PowerPoint at the bottom. Settings are kept if you close this and come back.</p>
   <h4>Title</h4>
-  <label>Atlas title <input type="text" id="aTitle" style="width:380px" value="${esc(A.title)}" placeholder="e.g. Prostate + pelvic nodes CTV atlas"></label>
-  <label>Created by (optional) <input type="text" id="aCreator" style="width:220px" value="${esc(A.creator)}"></label>
+  <div class="frow"><span class="fl">Atlas title</span><input type="text" id="aTitle" style="width:420px" value="${esc(A.title)}" placeholder="e.g. Prostate + pelvic nodes CTV atlas"></div>
+  <div class="frow"><span class="fl">Created by <small>(optional)</small></span><input type="text" id="aCreator" style="width:260px" value="${esc(A.creator)}"></div>
 
-  <h4>Planes and volume of interest</h4>
-  Each plane has its own box. Pick which one to edit, then drag inside a box to move it or drag its edges to resize, on any of the three views.
-  Shaded areas show the full extent of the selected structures. Sagittal and coronal boxes are limited in height so the image fills a landscape A4 page (widen the box to allow more height).
-  Which planes are built is set per scan below.
+  <h4>Area and slices</h4>
+  <p class="hint">Each plane has its own box. Choose the plane to edit, then drag inside a box to move it or drag its edges to resize it, on any of the three views.
+  Shading shows the full extent of the selected structures. Sagittal and coronal boxes are limited in height so the image fills a landscape A4 page; widen the box to allow more height.</p>
   <table style="margin-top:6px"><tr><th>Edit</th><th>Plane</th><th>Every Nth slice</th><th>Spacing</th><th>Pages per scan</th><th></th></tr>
   ${APLANES.map(p => `<tr>
     <td><input type="radio" name="voiEdit" value="${p}" ${A.edit === p ? 'checked' : ''}></td><td>${PNAME[p]}</td>
@@ -205,19 +206,19 @@ function atlasRender() {
   <h4>Legend</h4>
   <label><input type="checkbox" id="aLeg" ${A.legend.on ? 'checked' : ''}> Add a legend page describing the structures</label>
   <div id="aLegBox" style="display:${A.legend.on ? 'block' : 'none'};margin-top:6px">
-    <div id="aLegMsg" style="color:#c90;margin-bottom:4px"></div>
+    <div id="aLegMsg" style="margin-bottom:6px;font-size:12px"></div>
     <label><input type="checkbox" id="aLegOnly" ${A.legend.onlyDescribed ? 'checked' : ''}> Only list structures that have a description</label>
     <table>${incRois.map(r => `<tr><td style="vertical-align:top;white-space:nowrap"><span class="sw" style="background:rgb(${r.color})"></span>${esc(r.name)}</td>
       <td><textarea class="aDesc ${(A.legend.desc[r.number] || '').trim() ? '' : 'empty'}" data-n="${r.number}" placeholder="Description, e.g. boundaries / guideline reference">${esc(A.legend.desc[r.number] || '')}</textarea></td></tr>`).join('')}</table>
   </div>
 
   <h4>Output</h4>
-  Image resolution (image width): <select id="aQ">${[800, 1000, 1200, 1600, 2200].map(q => `<option ${A.quality === q ? 'selected' : ''}>${q}</option>`).join('')}</select> px
-  <small style="color:#999">The CT itself is only ~300–500 px across the crop, so above ~1200 px only contour lines and note text get sharper.</small>
+  <div class="frow"><span class="fl">Image resolution</span><select id="aQ">${[800, 1000, 1200, 1600, 2200].map(q => `<option ${A.quality === q ? 'selected' : ''}>${q}</option>`).join('')}</select> <small>px wide</small></div>
+  <p class="hint">The CT itself is only ~300–500 px across the crop, so above ~1200 px only the contour lines and note text get sharper.</p>
   <div class="foot">
-    <span id="aSummary"></span><br>
-    <button id="aBuild" style="font-weight:bold">Build PDF</button>
-    <button id="aBuildPpt" style="font-weight:bold">Build PowerPoint</button>
+    <span id="aSummary"></span>
+    <button id="aBuild" class="primary">Build PDF</button>
+    <button id="aBuildPpt" class="primary">Build PowerPoint</button>
     <select id="aPptLayout" title="PowerPoint slide size"><option value="16x9" ${(A.pptLayout || '16x9') === '16x9' ? 'selected' : ''}>Slides 16:9</option><option value="A4" ${A.pptLayout === 'A4' ? 'selected' : ''}>Slides A4</option></select>
     <button id="aClose">Close</button>
     <progress id="aProg" value="0" max="1" style="display:none"></progress> <span id="aProgTxt"></span>
@@ -271,7 +272,7 @@ function atlasRender() {
   $('aLegOnly').onchange = e => { A.legend.onlyDescribed = e.target.checked; };
   q('.aDesc').forEach(x => x.oninput = e => { A.legend.desc[+e.target.dataset.n] = e.target.value; e.target.classList.toggle('empty', !e.target.value.trim()); legendMsg(); });
   $('aQ').onchange = e => { A.quality = +e.target.value; atlasSummary(); };
-  $('aClose').onclick = atlasClose;
+  $('aClose').onclick = $('aX').onclick = () => atlasClose();
   $('aBuild').onclick = buildAtlas;
   $('aBuildPpt').onclick = buildPptx;
   $('aPptLayout').onchange = e => A.pptLayout = e.target.value;
@@ -282,7 +283,7 @@ function legendMsg() {
   const inc = rois.filter(r => atlas.roiOn[r.number]);
   const missing = inc.filter(r => !(atlas.legend.desc[r.number] || '').trim()).length;
   el.textContent = missing ? `Please fill in descriptions: ${missing} of ${inc.length} included structures have none yet (highlighted).` : 'All included structures have a description.';
-  el.style.color = missing ? '#c90' : '#9c9';
+  el.style.color = missing ? 'var(--warn)' : 'var(--ok)';
 }
 function atlasCounts() {
   APLANES.forEach(p => {
@@ -689,6 +690,15 @@ async function buildAtlas() {
     const nNotes = notePages.length;
     doc.text(`${incRois.length} structures, ${nNotes} annotated slice${nNotes === 1 ? '' : 's'}, ${total} pages.  Navigation: each page links to the same slice on the other scans, the other planes,`, 20, H - 16);
     doc.text('the previous/next slice and, where present, the previous/next annotated slice.', 20, H - 11.5);
+    // attribution
+    doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(...DIM);
+    const wm1 = 'Created with ', wm2 = 'ROCAG';
+    doc.setFont('helvetica', 'bold'); const w2 = doc.getTextWidth(wm2); doc.setFont('helvetica', 'normal'); const w1 = doc.getTextWidth(wm1);
+    const wx = W - 14 - w1 - w2;
+    doc.text(wm1, wx, 12); doc.setFont('helvetica', 'bold'); doc.setTextColor(...ACC); doc.text(wm2, wx + w1, 12);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); doc.setTextColor(...DIM);
+    doc.text('Radiation Oncology Contour Atlas Generator', W - 14, 15.5, {align: 'right'});
+    doc.link(wx - 1, 8.5, W - 14 - wx + 1, 8.5, {url: ROCAG_URL});
   }
   // ---- legend pages ----
   legendPages.forEach((items, li) => {
@@ -870,6 +880,9 @@ async function buildPptx() {
       }
       s.addText(`${incRois.length} structures, ${notePages.length} annotated slides, ${total} slides. Buttons work in slide-show mode.`,
         {x: 0.6, y: L.H - 0.55, w: L.W - 1.2, h: 0.3, fontFace: FONT, fontSize: 9, color: DIM, margin: 0});
+      s.addText([{text: 'Created with ', options: {color: DIM}}, {text: 'ROCAG', options: {color: ACC, bold: true, hyperlink: {url: ROCAG_URL, tooltip: 'Radiation Oncology Contour Atlas Generator'}}},
+                 {text: '\nRadiation Oncology Contour Atlas Generator', options: {color: DIM, fontSize: 7}}],
+        {x: L.W - 3.6, y: 0.25, w: 3.3, h: 0.45, fontFace: FONT, fontSize: 9, align: 'right', valign: 'top', margin: 0});
     }
     // ---- legend slides ----
     legendSlides.forEach((items, li) => {

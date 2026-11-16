@@ -11,11 +11,9 @@ $('patDir').onchange = async e => {
   if (!files.length) return;
   let dlg = $('patDlg');
   if (!dlg) { dlg = document.createElement('div'); dlg.id = 'patDlg'; document.body.appendChild(dlg); }
-  dlg.style.display = 'block';
-  dlg.innerHTML = `<div class="panel"><h3 style="margin-top:0">Reading patient folder…</h3>
-    <progress id="pProg" max="${files.length}" value="0" style="width:400px"></progress> <span id="pProgTxt"></span></div>`;
-  try { patScan = await scanFolder(files); patRender(); }
-  catch (err) { dlg.querySelector('.panel').innerHTML += `<p style="color:#f88">ERROR: ${esc(err)}</p><button onclick="$('patDlg').style.display='none'">Close</button>`; }
+  busy('Sorting patient folder', 0, `${files.length} files`); await paint();
+  try { patScan = await scanFolder(files); busyDone(true); dlg.style.display = 'block'; patRender(); }
+  catch (err) { busyDone(true); log('ERROR reading the folder: ' + err); }
 };
 
 async function scanFolder(files) {
@@ -43,11 +41,7 @@ async function scanFolder(files) {
       const s = series[h.series] || (series[h.series] = {...h, files: [], key: h.series});
       s.files.push(f);
     }
-    if (i % 40 === 39) {
-      $('pProg').value = i + 1;
-      $('pProgTxt').textContent = `${i + 1} / ${files.length} files (${((performance.now() - t0) / 1000).toFixed(0)} s)`;
-      await new Promise(r => setTimeout(r));
-    }
+    if (i % 40 === 39) { busy(null, (i + 1) / files.length, `Checking ${i + 1} of ${files.length} files`); await paint(); }
   }
   const list = Object.values(series).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
   // defaults: primary = CT referenced by the newest structure set, else the largest CT, else largest series
@@ -116,7 +110,10 @@ function patRender() {
   const priS = ps.list.find(s => s.key === ps.sel.pri);
   const otherTxt = Object.entries(ps.other).map(([k, v]) => `${v} ${k}`).join(', ');
   dlg.innerHTML = `<div class="panel">
-  <h3 style="margin-top:0">Patient folder</h3>
+  <button class="ghost x" id="pX" aria-label="Close">×</button>
+  <h3>Patient folder</h3>
+  <p class="sub">Check what was found, choose the primary CT, any extra scans, the structure set and the dose, then load.</p>
+  <h4>Summary</h4>
   ${ps.nFiles} files: ${ps.list.length} image series, ${ps.structs.length} structure set${ps.structs.length === 1 ? '' : 's'}, ${ps.regs.length} registration${ps.regs.length === 1 ? '' : 's'}${otherTxt ? `, ${otherTxt} (not used yet)` : ''}${ps.skipped ? `, ${ps.skipped} non-DICOM/unreadable skipped` : ''}.
   ${$('anonChk').checked ? '<br><span class="ok">Anonymise on import is on</span>: dates and patient details are hidden here and removed as files are loaded.' : ''}
   <h4>Image series</h4>
@@ -138,12 +135,10 @@ function patRender() {
   }).join('')}</select>
   <h4>Dose</h4>
   ${ps.doseOpts.length ? `<select id="pDose"><option value="">None</option>${ps.doseOpts.map((o, i) => `<option value="${i}" ${ps.sel.dose === i ? 'selected' : ''}>${esc(o.label)}${priS && o.FoR !== priS.FoR ? ' (other frame of reference)' : ''}</option>`).join('')}</select>
-    <small>${ps.doses.length} RTDOSE file${ps.doses.length === 1 ? '' : 's'}, ${ps.plans.length} RTPLAN${ps.plans.length === 1 ? '' : 's'} (prescription is read from the plan).</small>` : 'No RTDOSE files found.'}
+    <small style="margin-left:8px">${ps.doses.length} RTDOSE file${ps.doses.length === 1 ? '' : 's'}, ${ps.plans.length} RTPLAN${ps.plans.length === 1 ? '' : 's'} (prescription is read from the plan).</small>` : 'No RTDOSE files found.'}
   <h4>Registrations</h4>
   ${ps.regs.length ? `All ${ps.regs.length} REG file${ps.regs.length > 1 ? 's are' : ' is'} loaded; scans registered to each other are chained back to the primary automatically.` : 'None found: only scans sharing the primary\'s frame of reference will line up.'}
-  <div style="margin-top:14px;border-top:1px solid #333;padding-top:10px">
-    <button id="pLoad" style="font-weight:bold">Load selected</button> <button id="pClose">Cancel</button> <span id="pMsg"></span>
-  </div></div>`;
+  <div class="pfoot"><button id="pLoad" class="primary">Load selected</button> <button id="pClose">Cancel</button> <span id="pMsg" class="mid"></span></div></div>`;
   dlg.querySelectorAll('input[name=pPri]').forEach(r => r.onchange = e => {
     const s = ps.list[+e.target.dataset.i]; ps.sel.pri = s.key; ps.sel.extra.delete(s.key); patDefaultRs(ps); patRender();
   });
@@ -156,7 +151,7 @@ function patRender() {
   });
   $('pRs').onchange = e => ps.sel.rs = e.target.value === '' ? null : +e.target.value;
   if ($('pDose')) $('pDose').onchange = e => ps.sel.dose = e.target.value === '' ? null : +e.target.value;
-  $('pClose').onclick = () => dlg.style.display = 'none';
+  $('pClose').onclick = $('pX').onclick = () => dlg.style.display = 'none';
   $('pLoad').onclick = patLoad;
 }
 
@@ -167,6 +162,8 @@ async function patLoad() {
   const extras = ps.list.filter(s => ps.sel.extra.has(s.key) && s.key !== pri.key);
   dlg.style.display = 'none';
   const rs = ps.sel.rs != null ? ps.structs[ps.sel.rs].file : null;
+  busyBatch = true;
+  try {
   if (!(await loadPrimaryFrom(pri.files, rs))) return;
   $('name_pri').value = priName = pri.desc ? `${pri.mod} ${pri.desc}`.slice(0, 40) : pri.mod;
   // every REG goes in, so chains through other scans resolve
@@ -180,4 +177,6 @@ async function patLoad() {
   if (ps.sel.dose != null && ps.doseOpts[ps.sel.dose]) { if (await loadDoseFrom(ps.doseOpts[ps.sel.dose].files)) dTxt = ' + dose'; }
   current = 'pri'; buildImgSel(); draw(); renderNotesPanel();
   log(`Patient folder loaded: primary + ${extras.length} extra scan(s)${dTxt}.`);
+  toast(`Loaded ${scanName('pri')}${extras.length ? ` + ${extras.length} scan${extras.length > 1 ? 's' : ''}` : ''}${dTxt}${rois.length ? `, ${rois.length} structures` : ''}.`, 'ok');
+  } finally { busyBatch = false; busyDone(true); }
 }

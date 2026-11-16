@@ -2,135 +2,417 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>RT DICOM Pyodide test</title>
+<title>ROCAG · Radiation Oncology Contour Atlas Generator</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Build navigable PDF and PowerPoint contouring atlases from DICOM CT, structures, registered scans and dose, entirely in the browser.">
+<link rel="preconnect" href="https://api.fontshare.com">
+<link href="https://api.fontshare.com/v2/css?f[]=general-sans@400,500,600,700&display=swap" rel="stylesheet">
 <style>
-  body{font-family:system-ui,sans-serif;background:#111;color:#ddd;margin:16px}
-  #wrap{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}
-  canvas{background:#000;cursor:crosshair}
-  canvas.cropping{cursor:cell}
-  #rois{font-size:13px;max-height:85vh;overflow:auto;min-width:320px}
-  #rois table{border-collapse:collapse}
-  #rois td{padding:1px 4px}
-  #rois input[type=text]{width:150px;background:#222;color:#ddd;border:1px solid #444}
-  #rois input[type=color]{width:28px;height:18px;padding:0;border:0;background:none}
-  #rois .renamed{border-color:#c90 !important}
-  pre{font-size:12px;white-space:pre-wrap;color:#9c9;max-height:22vh;overflow:auto}
-  label{margin-right:12px}
-  fieldset{border:1px solid #444;margin:0 0 8px;padding:6px 10px}
-  fieldset.sec legend b{color:#8cf}
-  .status{font-size:12px;margin-left:8px}
-  .status.ok{color:#9c9} .status.bad{color:#f88}
-  input[type=number]{width:60px}
-  button{margin-right:4px}
-  .bar{margin:6px 0}
-  #atlasDlg,#patDlg{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:50;overflow:auto;display:none}
-  #patDlg .panel{background:#181818;border:1px solid #444;border-radius:6px;max-width:1150px;margin:20px auto;padding:14px 18px;font-size:13px}
-  #patDlg h4{margin:14px 0 6px;color:#8cf;border-bottom:1px solid #333;padding-bottom:3px}
-  #patDlg table{border-collapse:collapse;width:100%} #patDlg td,#patDlg th{padding:3px 6px;text-align:left;border-bottom:1px solid #262626}
-  #patDlg tr.dim td{color:#777}
-  #patDlg .ok{color:#9c9} #patDlg .bad{color:#f88} #patDlg .mid{color:#c90}
-  #atlasDlg .panel{background:#181818;border:1px solid #444;border-radius:6px;max-width:1100px;margin:20px auto;padding:14px 18px;font-size:13px}
-  #atlasDlg h4{margin:14px 0 6px;color:#8cf;border-bottom:1px solid #333;padding-bottom:3px}
-  #atlasDlg table{border-collapse:collapse} #atlasDlg td,#atlasDlg th{padding:2px 6px;text-align:left}
-  #atlasDlg input[type=text]{background:#222;color:#ddd;border:1px solid #444}
-  #atlasDlg textarea{background:#222;color:#ddd;border:1px solid #444;width:520px;height:34px;font:12px system-ui}
-  #atlasDlg textarea.empty{border-color:#c90}
-  #atlasDlg .thumbs{display:flex;gap:10px;align-items:flex-start;margin-top:6px}
-  #atlasDlg .thumbs canvas{background:#000;cursor:move;border:1px solid #333}
-  #atlasDlg .thumbs div{text-align:center;font-size:12px}
-  #atlasDlg .sw{display:inline-block;width:10px;height:10px;margin-right:4px}
-  #atlasDlg .roiGrid{columns:3;max-height:220px;overflow:auto}
-  #atlasDlg .roiGrid label{display:block;break-inside:avoid}
-  #atlasDlg .foot{position:sticky;bottom:0;background:#181818;padding:10px 0 2px;border-top:1px solid #333;margin-top:12px}
-  #atlasDlg progress{width:300px;vertical-align:middle}
-  .scanName{width:170px;background:#222;color:#ddd;border:1px solid #444}
-  #stage{position:relative;line-height:0}
-  #notesLayer{position:absolute;left:0;top:0;pointer-events:none;line-height:normal}
-  canvas.placing{cursor:copy}
-  .note{position:absolute;pointer-events:auto;background:rgba(10,10,10,.82);border:1.5px solid #ffd400;border-radius:4px;width:max-content;max-width:260px;cursor:move}
-  .note.editing{cursor:text}
-  .note .txt{padding:3px 6px;font:12px/1.35 system-ui;color:#fff;white-space:pre-wrap;overflow-wrap:break-word;min-width:24px;outline:none;cursor:inherit}
-  .note .txt:empty:before{content:'Type note…';color:#888}
-  .note .del{position:absolute;top:-9px;right:-9px;width:16px;height:16px;border-radius:8px;background:#c33;color:#fff;font:bold 12px/16px system-ui;text-align:center;cursor:pointer;display:none}
-  .note:hover .del{display:block}
-  .note .ntools{position:absolute;bottom:100%;left:-1.5px;display:none;gap:6px;align-items:center;background:#ffd400;color:#111;font:11px system-ui;padding:1px 6px;border-radius:4px 4px 0 0;white-space:nowrap;cursor:default}
-  .note .ntools label{margin:0;cursor:pointer} .note .ntools input{margin:0 2px 0 0;vertical-align:-2px}
-  .note:hover .ntools,.note.editing .ntools{display:flex}
-  #side{display:flex;flex-direction:column;gap:12px;min-width:320px}
-  #notesPanel{font-size:13px}
-  #notesPanel .nl{max-height:22vh;overflow:auto;margin-top:4px}
-  #notesPanel .ni{padding:2px 4px;cursor:pointer;border-left:3px solid transparent}
-  #notesPanel .ni:hover{background:#222}
-  #notesPanel .ni.here{border-left-color:#ffd400}
-  #addNote.on{background:#ffd400;color:#111}
-.njp{color:#7cf;text-decoration:underline;cursor:pointer;margin:0 1px}
-  #dosePanel{font-size:13px}
-  #dosePanel .dinfo{color:#aaa;margin:3px 0}
-  #dosePanel .drow{margin:4px 0}
-  #dosePanel .bad{color:#f88}
-  #dosePanel input[type=number]{width:62px}
-  #dosePanel table.diso{border-collapse:collapse} #dosePanel .diso td,#dosePanel .diso th{padding:1px 4px;text-align:left;font-weight:normal;color:#aaa}
-  #dosePanel input[type=color]{width:28px;height:18px;padding:0;border:0;background:none}
-  #rois input.lwi{width:42px}
-  canvas.drawing{cursor:crosshair}
-  #mkMenu{position:absolute;z-index:20;background:#1d1d1d;border:1px solid #ffd400;border-radius:4px;font:12px/1.4 system-ui;color:#ddd;min-width:150px;line-height:normal;box-shadow:0 2px 8px rgba(0,0,0,.6)}
-  #mkMenu .mh{padding:3px 8px;color:#111;background:#ffd400;font-weight:bold}
-  #mkMenu .mi{padding:4px 10px;cursor:pointer} #mkMenu .mi:hover{background:#333} #mkMenu .mi.on{color:#ffd400}
-  #mkMenu .mhint{padding:3px 8px 5px;color:#999;font-size:11px;max-width:170px}
+:root{
+  --bg:#0a0b0d; --surface:#111317; --surface-2:#171a1f; --surface-3:#1e2228; --border:#262b32; --border-2:#333943;
+  --text:#e9eaec; --muted:#9aa1ab; --faint:#626973;
+  --accent:#f5c400; --accent-hover:#ffd633; --accent-ink:#121212; --accent-soft:rgba(245,196,0,.12);
+  --ok:#53c98f; --bad:#ff6b6b; --warn:#e8a83a;
+  --r-sm:6px; --r:10px; --r-lg:14px;
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:20px; --s6:24px; --s8:32px; --s10:40px;
+  --t-xs:12px; --t-sm:13px; --t-base:14px; --t-md:15px; --t-lg:18px; --t-xl:24px;
+  --font:'General Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --side-w:372px; --head-h:60px;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:var(--t-base)/1.45 var(--font);-webkit-font-smoothing:antialiased;overflow:hidden}
+button,input,select,textarea{font:inherit;color:inherit}
+small{font-size:var(--t-xs);color:var(--muted)}
+::selection{background:var(--accent);color:var(--accent-ink)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.ok{color:var(--ok)} .bad{color:var(--bad)} .mid{color:var(--warn)}
+
+/* ---------- controls ---------- */
+button{background:var(--surface-3);border:1px solid var(--border-2);border-radius:var(--r-sm);padding:5px 11px;cursor:pointer;font-size:var(--t-sm);font-weight:500;line-height:1.3;transition:background .12s,border-color .12s,color .12s;margin:0}
+button:hover:not(:disabled){background:#262b33;border-color:#434a55}
+button:disabled{opacity:.4;cursor:not-allowed}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+button.primary:hover:not(:disabled){background:var(--accent-hover);border-color:var(--accent-hover)}
+button.ghost{background:transparent;border-color:transparent;color:var(--muted)}
+button.ghost:hover:not(:disabled){background:var(--surface-3);color:var(--text)}
+button.icon{padding:5px 7px;display:inline-flex;align-items:center;justify-content:center}
+button.on,#addNote.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+input[type=text],input[type=number],select,textarea{background:var(--surface);border:1px solid var(--border-2);border-radius:var(--r-sm);padding:4px 8px;font-size:var(--t-sm);min-width:0}
+input[type=text]:focus,input[type=number]:focus,select:focus,textarea:focus{border-color:var(--accent);outline:none}
+input[type=number]{width:64px}
+select{padding-right:4px}
+input[type=checkbox],input[type=radio]{accent-color:var(--accent)}
+input[type=range]{accent-color:var(--accent)}
+input[type=color]{width:26px;height:20px;padding:0;border:1px solid var(--border-2);border-radius:4px;background:none;cursor:pointer}
+input[type=color]::-webkit-color-swatch-wrapper{padding:0} input[type=color]::-webkit-color-swatch{border:0;border-radius:3px}
+label{cursor:pointer}
+.seg{display:inline-flex;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm);padding:2px;gap:2px}
+.seg label{margin:0;padding:4px 11px;border-radius:4px;font-size:var(--t-sm);color:var(--muted);white-space:nowrap;font-weight:500;user-select:none}
+.seg label:hover{color:var(--text)}
+.seg input{position:absolute;opacity:0;pointer-events:none}
+.seg label:has(input:checked){background:var(--surface-3);color:var(--text);box-shadow:inset 0 0 0 1px var(--border-2)}
+kbd{font:600 11px var(--font);background:var(--surface-3);border:1px solid var(--border-2);border-bottom-width:2px;border-radius:4px;padding:0 5px;color:var(--muted)}
+
+/* ---------- header ---------- */
+header.top{height:var(--head-h);display:flex;align-items:center;gap:var(--s6);padding:0 var(--s5);border-bottom:1px solid var(--border);background:var(--surface)}
+.brand{display:flex;align-items:center;gap:var(--s3);min-width:0}
+.brand .mark{font-weight:700;font-size:var(--t-lg);letter-spacing:.08em;color:var(--accent-ink);background:var(--accent);padding:3px 9px;border-radius:5px}
+.brand .bt{font-weight:600;font-size:var(--t-md);white-space:nowrap}
+.brand .bs{font-size:var(--t-xs);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.brand>div{min-width:0}
+ol.steps{display:flex;gap:var(--s1);list-style:none;margin:0 0 0 auto;padding:0;counter-reset:st}
+ol.steps li{counter-increment:st;display:flex;align-items:center;gap:var(--s2);font-size:var(--t-sm);color:var(--faint);padding:4px 10px 4px 4px;border-radius:999px;white-space:nowrap}
+ol.steps li::before{content:counter(st);width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:600;border:1px solid var(--border-2)}
+ol.steps li+li{position:relative;margin-left:18px} ol.steps li+li::after{content:'';position:absolute;left:-18px;top:50%;width:14px;height:1px;background:var(--border-2)}
+ol.steps li.on{color:var(--text);background:var(--surface-3)} ol.steps li.on::before{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+ol.steps li.done{color:var(--muted)} ol.steps li.done::before{content:'\2713';background:transparent;border-color:var(--ok);color:var(--ok)}
+.top-actions{display:flex;align-items:center;gap:var(--s2)}
+.chip{font-size:var(--t-xs);color:var(--muted);border:1px solid var(--border-2);border-radius:999px;padding:3px 10px;white-space:nowrap;max-width:190px;overflow:hidden;text-overflow:ellipsis}
+.top-actions button{white-space:nowrap}
+.chip.ready{color:var(--ok);border-color:rgba(83,201,143,.35)}
+.chip.pat{color:var(--text)}
+
+/* ---------- layout ---------- */
+main{height:calc(100% - var(--head-h));position:relative}
+#welcome{display:none;height:100%;overflow:auto;padding:var(--s10) var(--s6)}
+main.empty #welcome{display:block} main.empty #work{display:none}
+#work{display:flex;height:100%}
+.wel{max-width:880px;margin:0 auto}
+.wel h1{font-size:var(--t-xl);font-weight:600;margin:0 0 var(--s2);letter-spacing:-.01em}
+.wel .lead{color:var(--muted);margin:0 0 var(--s8);max-width:640px;font-size:var(--t-md)}
+.cards{display:grid;grid-template-columns:1fr 1fr;gap:var(--s4)}
+.card{display:flex;flex-direction:column;align-items:flex-start;gap:var(--s2);text-align:left;padding:var(--s6);border-radius:var(--r-lg);background:var(--surface);border:1px solid var(--border);min-height:190px;font-weight:400}
+.card:hover:not(:disabled){border-color:var(--accent);background:var(--surface-2)}
+.card svg{width:28px;height:28px;color:var(--accent);margin-bottom:var(--s2)}
+.card b{font-size:var(--t-lg);font-weight:600}
+.card span{color:var(--muted);font-size:var(--t-sm)}
+.card .tag{margin-top:auto;font-size:var(--t-xs);color:var(--accent);border:1px solid rgba(245,196,0,.35);border-radius:999px;padding:1px 8px}
+.card.alt .tag{color:var(--muted);border-color:var(--border-2)}
+.anon{display:flex;gap:var(--s3);align-items:flex-start;margin-top:var(--s5);padding:var(--s4);border-radius:var(--r);background:var(--surface);border:1px solid var(--border)}
+.anon label{font-weight:500;white-space:nowrap}
+.engine{margin-top:var(--s5);display:flex;align-items:center;gap:var(--s3);color:var(--muted);font-size:var(--t-sm)}
+.engine .bar{width:200px}
+.how{margin-top:var(--s8);display:grid;grid-template-columns:repeat(3,1fr);gap:var(--s4)}
+.how div{padding:var(--s4);border-top:1px solid var(--border)}
+.how b{display:block;font-weight:600;margin-bottom:var(--s1)} .how span{color:var(--muted);font-size:var(--t-sm)}
+
+/* ---------- viewer ---------- */
+#viewer{flex:1;display:flex;flex-direction:column;min-width:0;background:#000}
+.vbar{display:flex;align-items:center;gap:var(--s2);padding:var(--s2) var(--s3);background:var(--surface);border-bottom:1px solid var(--border);flex-wrap:wrap;min-height:48px}
+.vbar .sp{flex:1}
+.vbar .grp{display:flex;align-items:center;gap:var(--s2)}
+.vbar .lbl{font-size:var(--t-xs);color:var(--faint);text-transform:uppercase;letter-spacing:.06em;margin-right:2px}
+#imgSel{display:inline-flex}
+#imgSel:empty{display:none}
+#secWL{display:none;align-items:center;gap:var(--s1);font-size:var(--t-xs);color:var(--muted)}
+#secWL input{width:58px}
+#viewport{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+#stage{position:relative;line-height:0}
+#cv{background:#000;cursor:crosshair;display:block}
+canvas.cropping{cursor:cell} canvas.placing{cursor:copy} canvas.drawing{cursor:crosshair}
+.sbar{display:flex;align-items:center;gap:var(--s3);padding:var(--s2) var(--s4);background:var(--surface);border-top:1px solid var(--border);font-size:var(--t-xs);color:var(--muted)}
+#slice{flex:1;max-width:560px}
+#sl{min-width:70px;color:var(--text);font-variant-numeric:tabular-nums}
+.sbar .keys{margin-left:auto;white-space:nowrap}
+.pop{position:relative}
+.pop>.menu{display:none;position:absolute;top:calc(100% + 6px);right:0;z-index:30;background:var(--surface-2);border:1px solid var(--border-2);border-radius:var(--r);padding:var(--s3);width:290px;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+.pop.open>.menu{display:block}
+.menu .row{display:flex;gap:var(--s2);flex-wrap:wrap;align-items:center;margin-bottom:var(--s2)}
+.menu .row button{flex:1}
+#cropInfo{display:block;font-size:var(--t-xs);color:var(--muted);margin-top:var(--s2)}
+#viewer:fullscreen .vbar,#viewer:fullscreen .sbar{background:rgba(17,19,23,.92)}
+
+/* ---------- side panel ---------- */
+#side{width:var(--side-w);flex:none;display:flex;flex-direction:column;border-left:1px solid var(--border);background:var(--surface)}
+#side.hidden{display:none}
+.side-scroll{flex:1;overflow:auto}
+.acc{border-bottom:1px solid var(--border)}
+.acc-h{width:100%;display:flex;align-items:center;gap:var(--s2);background:none;border:0;border-radius:0;padding:var(--s3) var(--s4);font-size:var(--t-md);font-weight:600;text-align:left}
+.acc-h:hover:not(:disabled){background:var(--surface-2);border:0}
+.acc-h .cnt{font-size:var(--t-xs);color:var(--muted);font-weight:500}
+.acc-h::after{content:'';margin-left:auto;width:7px;height:7px;border-right:1.5px solid var(--muted);border-bottom:1.5px solid var(--muted);transform:rotate(45deg);transition:transform .15s;margin-top:-3px}
+.acc.closed .acc-h::after{transform:rotate(-45deg);margin-top:0}
+.acc-b{padding:0 var(--s4) var(--s4)}
+.acc.closed .acc-b{display:none}
+.side-foot{padding:var(--s4);border-top:1px solid var(--border);background:var(--surface-2)}
+.side-foot button{width:100%;padding:11px;font-size:var(--t-md)}
+.side-foot small{display:block;margin-top:var(--s2);text-align:center}
+
+/* scans list */
+.scan{display:grid;grid-template-columns:auto 1fr auto;gap:var(--s2);align-items:center;padding:var(--s2);border-radius:var(--r-sm);border:1px solid transparent}
+.scan.cur{background:var(--surface-2);border-color:var(--border)}
+.scan .n{font-size:11px;font-weight:600;color:var(--muted);width:20px;height:20px;border-radius:4px;background:var(--surface-3);display:grid;place-items:center;cursor:pointer}
+.scan.cur .n{background:var(--accent);color:var(--accent-ink)}
+.scan input{width:100%}
+.scan .meta{grid-column:2/4;font-size:var(--t-xs);color:var(--muted);margin-top:-2px}
+.scan .meta .bad{font-weight:500}
+.scan-actions{display:flex;gap:var(--s2);margin-top:var(--s3)}
+
+/* structures */
+#rois{font-size:var(--t-sm)}
+#rois .rtools{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;margin-bottom:var(--s2)}
+#rois .rtools .lwall{display:flex;align-items:center;gap:var(--s1);margin-left:auto;font-size:var(--t-xs);color:var(--muted)}
+#rois table{border-collapse:collapse;width:100%}
+#rois td{padding:2px 2px;vertical-align:middle}
+#rois tr:hover td{background:var(--surface-2)}
+#rois input[type=text]{width:100%;background:transparent;border-color:transparent;padding:2px 4px}
+#rois input[type=text]:hover{border-color:var(--border-2)}
+#rois input[type=text]:focus{background:var(--surface);border-color:var(--accent)}
+#rois .renamed{border-color:var(--warn) !important}
+#rois input.lwi{width:46px;padding:2px 4px}
+#rois .go{padding:1px 6px;background:transparent;border-color:transparent;color:var(--muted)}
+#rois .go:hover{color:var(--text)}
+#rois small{white-space:nowrap}
+
+/* dose */
+#dosePanel{font-size:var(--t-sm)}
+#dosePanel .dinfo{color:var(--muted);margin:0 0 var(--s3);font-size:var(--t-xs);line-height:1.5}
+#dosePanel .drow{margin:var(--s2) 0;display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap}
+#dosePanel .drow>.dl{width:62px;color:var(--muted);font-size:var(--t-xs)}
+#dosePanel #dRef{width:64px} #dosePanel #dRefMax,#dosePanel #dRefRx{padding:4px 8px;font-size:var(--t-xs)}
+#dosePanel .bad{color:var(--bad);font-size:var(--t-xs);margin-bottom:var(--s2)}
+#dosePanel input[type=number]{width:70px}
+#dosePanel table.diso{border-collapse:collapse;width:100%;margin-top:var(--s1)}
+#dosePanel .diso td,#dosePanel .diso th{padding:2px 3px;text-align:left;font-weight:500;color:var(--muted);font-size:var(--t-xs)}
+#dosePanel .diso input[type=number]{width:72px}
+#doseRead{font-variant-numeric:tabular-nums;color:var(--text);font-size:var(--t-xs)}
+.dload{display:flex;gap:var(--s2);align-items:center;flex-wrap:wrap}
+.dload .fn{font-size:var(--t-xs);color:var(--muted);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* notes */
+#notesPanel{font-size:var(--t-sm)}
+#notesPanel .nhint{display:block;margin:var(--s2) 0}
+#notesPanel .nl{max-height:30vh;overflow:auto;margin-top:var(--s2);display:flex;flex-direction:column;gap:2px}
+#notesPanel .ni{padding:6px 8px;cursor:pointer;border-radius:var(--r-sm);border-left:3px solid transparent;background:var(--surface-2)}
+#notesPanel .ni:hover{background:var(--surface-3)}
+#notesPanel .ni.here{border-left-color:var(--accent)}
+#notesPanel .ni .nt{color:var(--text);display:block;margin-top:2px}
+#notesPanel .ni .nm{font-size:var(--t-xs);color:var(--muted)}
+.njp{color:var(--accent);text-decoration:none;cursor:pointer;margin:0 1px;font-weight:500}
+.njp:hover{text-decoration:underline}
+#notesLayer{position:absolute;left:0;top:0;pointer-events:none;line-height:normal}
+.note{position:absolute;pointer-events:auto;background:rgba(10,10,10,.82);border:1.5px solid #ffd400;border-radius:4px;width:max-content;max-width:260px;cursor:move}
+.note.editing{cursor:text}
+.note .txt{padding:3px 6px;font:12px/1.35 system-ui;color:#fff;white-space:pre-wrap;overflow-wrap:break-word;min-width:24px;outline:none;cursor:inherit}
+.note .txt:empty:before{content:'Type note…';color:#888}
+.note .del{position:absolute;top:-9px;right:-9px;width:16px;height:16px;border-radius:8px;background:#c33;color:#fff;font:bold 12px/16px system-ui;text-align:center;cursor:pointer;display:none}
+.note:hover .del{display:block}
+.note .ntools{position:absolute;bottom:100%;left:-1.5px;display:none;gap:6px;align-items:center;background:#ffd400;color:#111;font:11px system-ui;padding:1px 6px;border-radius:4px 4px 0 0;white-space:nowrap;cursor:default}
+.note .ntools label{margin:0;cursor:pointer} .note .ntools input{margin:0 2px 0 0;vertical-align:-2px}
+.note:hover .ntools,.note.editing .ntools{display:flex}
+#mkMenu{position:absolute;z-index:20;background:var(--surface-2);border:1px solid #ffd400;border-radius:6px;font:12px/1.4 var(--font);color:var(--text);min-width:160px;line-height:normal;box-shadow:0 6px 18px rgba(0,0,0,.6);overflow:hidden}
+#mkMenu .mh{padding:4px 10px;color:#111;background:#ffd400;font-weight:600}
+#mkMenu .mi{padding:6px 12px;cursor:pointer} #mkMenu .mi:hover{background:var(--surface-3)} #mkMenu .mi.on{color:#ffd400}
+#mkMenu .mhint{padding:4px 10px 7px;color:var(--muted);font-size:11px;max-width:180px}
+
+/* ---------- modals ---------- */
+.modal,#atlasDlg,#patDlg{position:fixed;inset:0;background:rgba(0,0,0,.72);backdrop-filter:blur(2px);z-index:50;overflow:auto;display:none;padding:var(--s6)}
+.modal.open{display:block}
+.panel{background:var(--surface);border:1px solid var(--border-2);border-radius:var(--r-lg);max-width:1120px;margin:0 auto;padding:var(--s6) var(--s8);font-size:var(--t-sm);box-shadow:0 20px 60px rgba(0,0,0,.6)}
+.panel h3{font-size:var(--t-xl);font-weight:600;margin:0 0 var(--s1);letter-spacing:-.01em}
+.panel .sub{color:var(--muted);margin:0 0 var(--s4)}
+.panel h4{font-size:var(--t-md);font-weight:600;margin:var(--s6) 0 var(--s3);padding-top:var(--s5);border-top:1px solid var(--border);display:flex;align-items:center;gap:var(--s2);color:var(--text)}
+.panel table{border-collapse:collapse}
+.panel td,.panel th{padding:4px 8px;text-align:left}
+.panel th{font-weight:500;color:var(--muted);font-size:var(--t-xs);border-bottom:1px solid var(--border)}
+.panel label{margin-right:var(--s3)}
+.panel .x{float:right;margin:-6px -14px 0 0;font-size:20px;line-height:1;padding:4px 10px}
+#atlasDlg .panel{counter-reset:ah}
+#atlasDlg h4::before{counter-increment:ah;content:counter(ah);width:22px;height:22px;border-radius:50%;display:inline-grid;place-items:center;font-size:12px;background:var(--surface-3);border:1px solid var(--border-2);color:var(--accent)}
+#atlasDlg h3+h4,#patDlg h3+h4{border-top:0;padding-top:0}
+#atlasDlg textarea{width:520px;height:36px;font-size:var(--t-xs)}
+#atlasDlg textarea.empty{border-color:var(--warn)}
+#atlasDlg .thumbs{display:flex;gap:var(--s3);align-items:flex-start;margin-top:var(--s3);flex-wrap:wrap}
+#atlasDlg .thumbs canvas{background:#000;cursor:move;border:1px solid var(--border-2);border-radius:4px}
+#atlasDlg .thumbs div{text-align:center;font-size:var(--t-xs);color:var(--muted)}
+#atlasDlg .sw{display:inline-block;width:10px;height:10px;margin-right:6px;border-radius:2px}
+#atlasDlg .roiGrid{columns:3;max-height:240px;overflow:auto;background:var(--surface-2);border-radius:var(--r-sm);padding:var(--s2) var(--s3)}
+#atlasDlg .roiGrid label{display:block;break-inside:avoid;padding:2px 0}
+#atlasDlg .foot{position:sticky;bottom:calc(-1 * var(--s6));background:var(--surface);padding:var(--s4) 0 var(--s2);border-top:1px solid var(--border);margin-top:var(--s6);display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap}
+#atlasDlg .foot #aSummary{flex-basis:100%;color:var(--muted);font-size:var(--t-xs)}
+#atlasDlg .foot #aBuild,#atlasDlg .foot #aBuildPpt{padding:8px 16px}
+#atlasDlg progress{width:260px;vertical-align:middle;accent-color:var(--accent)}
+#atlasDlg #aProgTxt{color:var(--muted);font-size:var(--t-xs)}
+#atlasDlg .hint,#patDlg .hint{color:var(--muted);font-size:var(--t-xs);max-width:860px}
+#patDlg table{width:100%} #patDlg td{border-bottom:1px solid var(--border)}
+#patDlg tr.dim td{color:var(--faint)}
+#patDlg .pfoot,#filesDlg .pfoot{margin-top:var(--s6);padding-top:var(--s4);border-top:1px solid var(--border);display:flex;gap:var(--s2);align-items:center}
+#patDlg #pLoad{padding:8px 18px}
+
+/* separate files dialog */
+#filesDlg .panel{max-width:860px}
+.fstep{display:grid;grid-template-columns:28px 1fr;gap:var(--s3);padding:var(--s4) 0;border-top:1px solid var(--border)}
+.fstep:first-of-type{border-top:0}
+.fstep .num{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;background:var(--surface-3);border:1px solid var(--border-2);color:var(--accent);font-size:12px;font-weight:600}
+.fstep b{display:block;font-size:var(--t-md);margin-bottom:var(--s2)}
+.frow{display:flex;align-items:center;gap:var(--s3);flex-wrap:wrap;margin:var(--s2) 0}
+.frow .fl{width:120px;color:var(--muted);font-size:var(--t-xs)}
+.pick{display:inline-flex;align-items:center;gap:var(--s2)}
+.pick input[type=file]{display:none}
+.pick .fn{font-size:var(--t-xs);color:var(--muted);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+fieldset.sec{border:1px solid var(--border);border-radius:var(--r);margin:var(--s2) 0;padding:var(--s3) var(--s4)}
+fieldset.sec legend{padding:0 var(--s2);font-weight:600}
+fieldset.sec legend b{color:var(--muted);font-weight:500;font-size:var(--t-xs)}
+fieldset.sec label{margin-right:var(--s3)}
+.status{font-size:var(--t-xs);margin-left:var(--s2)}
+.status.ok{color:var(--ok)} .status.bad{color:var(--bad)}
+.scanName{width:180px}
+
+/* ---------- progress, toasts, log ---------- */
+.bar{height:4px;background:var(--surface-3);border-radius:2px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .15s}
+.bar.ind i{width:30%;animation:ind 1.1s ease-in-out infinite}
+@keyframes ind{0%{transform:translateX(-100%)}100%{transform:translateX(340%)}}
+#busy{position:fixed;inset:0;z-index:80;display:none;place-items:center;background:rgba(0,0,0,.55);backdrop-filter:blur(2px)}
+#busy.open{display:grid}
+.busy-card{width:380px;background:var(--surface);border:1px solid var(--border-2);border-radius:var(--r-lg);padding:var(--s5) var(--s6);box-shadow:0 20px 50px rgba(0,0,0,.6)}
+#busyTitle{font-weight:600;font-size:var(--t-md);margin-bottom:var(--s3)}
+#busyTxt{font-size:var(--t-xs);color:var(--muted);margin-top:var(--s2);font-variant-numeric:tabular-nums;min-height:1.4em}
+#toasts{position:fixed;left:var(--s5);bottom:56px;z-index:90;display:flex;flex-direction:column;gap:var(--s2);max-width:420px}
+.toast{background:var(--surface-2);border:1px solid var(--border-2);border-left:3px solid var(--accent);border-radius:var(--r-sm);padding:var(--s3) var(--s4);font-size:var(--t-sm);box-shadow:0 8px 24px rgba(0,0,0,.5);animation:tin .18s ease-out}
+.toast.error{border-left-color:var(--bad)} .toast.ok{border-left-color:var(--ok)}
+@keyframes tin{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+#logDrawer{position:fixed;left:0;right:0;bottom:0;height:34vh;z-index:70;background:var(--surface);border-top:1px solid var(--border-2);display:none;flex-direction:column}
+#logDrawer.open{display:flex}
+#logDrawer .lh{display:flex;align-items:center;justify-content:space-between;padding:var(--s2) var(--s4);border-bottom:1px solid var(--border);font-weight:600;font-size:var(--t-sm)}
+#log{flex:1;margin:0;padding:var(--s3) var(--s4);overflow:auto;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:#8fbf9f;white-space:pre-wrap}
+
+@media (max-width:1400px){ .vbar .lbl{display:none} }
+@media (max-width:1320px){ .brand .bs{display:none} .sbar .keys{display:none} }
+@media (max-width:1180px){ .brand .bt{display:none} ol.steps li{font-size:0;padding:4px} ol.steps li::before{font-size:11px} :root{--side-w:330px} #patChip{display:none !important} }
+@media (max-width:760px){ body{overflow:auto} #work{flex-direction:column;height:auto} #side{width:auto;border-left:0;border-top:1px solid var(--border)} #viewport{min-height:60vh} .cards,.how{grid-template-columns:1fr} ol.steps{display:none} }
 </style>
 </head>
 <body>
-<h3>RT DICOM test (Pyodide + pydicom, files stay on this computer)</h3>
-<div class="bar">
-  <button id="patBtn" disabled style="font-weight:bold">Import patient folder…</button><input type="file" id="patDir" webkitdirectory multiple style="display:none">
-  <label><input type="checkbox" id="anonChk" checked> Anonymise on import</label>
-  <small id="anonInfo" style="color:#999">Removes names, IDs, dates, institution and private tags as files are read, and remaps UIDs consistently. Text burned into images is not removed.</small>
-</div>
-<fieldset><legend>Primary (CT) &nbsp; <label>Display name <input type="text" id="name_pri" class="scanName" value="CT"></label></legend>
-  <label>CT folder: <input type="file" id="ctDir" webkitdirectory multiple></label>
-  <label>or CT files: <input type="file" id="ctFiles" multiple></label>
-  <label>RTSTRUCT: <input type="file" id="rs"></label>
-  <button id="go" disabled>Load primary</button>
-</fieldset>
-<div id="secSlots"></div>
-<button id="addSec" disabled>+ Add another scan</button> <small>(up to 4 extra scans; a REG can link a scan to the CT or to another loaded scan)</small>
-
-<div class="bar">
-  Plane: <label><input type="radio" name="plane" value="ax" checked> Axial</label>
-  <label><input type="radio" name="plane" value="sag"> Sagittal</label>
-  <label><input type="radio" name="plane" value="cor"> Coronal</label>
-  <small>(A / S / C)</small>
-  &nbsp;|&nbsp; Image: <span id="imgSel"></span> <small>(T cycles, 1–5 select)</small>
-  &nbsp;|&nbsp; <label><input type="checkbox" id="xhair" checked> crosshair</label>
-  &nbsp;|&nbsp; <button id="atlasBtn" disabled style="font-weight:bold">Build atlas PDF…</button>
-</div>
-<div class="bar">
-  Crop: <button id="cropAuto" disabled>Auto (body)</button>
-  <button id="cropRois" disabled>To structures</button>
-  <button id="cropDraw" disabled>Draw box</button>
-  <button id="cropReset" disabled>Reset</button>
-  margin <input type="number" id="cropMargin" value="15" min="0" max="100"> mm
-  <span id="cropInfo" class="status"></span>
-</div>
-<div class="bar">
-  Slice <input type="range" id="slice" min="0" max="0" value="0" style="width:300px"> <span id="sl"></span>
-  &nbsp; CT W/L: <select id="wl">
-    <option value="400,40">Soft tissue 400/40</option>
-    <option value="1600,-600">Lung 1600/-600</option>
-    <option value="2000,300">Bone 2000/300</option>
-  </select>
-  &nbsp; <span id="secWL">Scan W <input type="number" id="sw"> L <input type="number" id="sl2"></span>
-</div>
-<pre id="log">Loading Pyodide…</pre>
-<div id="wrap">
-  <div id="stage"><canvas id="cv"></canvas><div id="notesLayer"></div></div>
-  <div id="side">
-    <div id="dosePanel"></div>
-    <div id="notesPanel"></div>
-    <div id="rois"></div>
+<header class="top">
+  <div class="brand">
+    <span class="mark" aria-label="ROCAG">ROCAG</span>
+    <div><div class="bt">Radiation Oncology Contour Atlas Generator</div>
+      <div class="bs">Turn DICOM CT, structures, registered scans and dose into a linked PDF or PowerPoint atlas. Runs in your browser.</div></div>
   </div>
-</div>
+  <ol class="steps"><li id="step1" class="on">Import</li><li id="step2">Review &amp; annotate</li><li id="step3">Create atlas</li></ol>
+  <div class="top-actions">
+    <span id="patChip" class="chip pat" style="display:none"></span>
+    <span id="engine" class="chip">Starting…</span>
+    <button id="newPat" class="ghost" style="display:none" title="Start again with another patient">New patient</button>
+    <button id="logBtn" class="ghost" title="Technical log">Log</button>
+  </div>
+</header>
+
+<main id="app" class="empty">
+  <section id="welcome">
+    <div class="wel">
+      <h1>Start with a patient</h1>
+      <p class="lead">Bring in a planning CT with its structure set. Registered MR or CT scans and the plan dose can come too. Then review, annotate and export the atlas.</p>
+      <div class="cards">
+        <button class="card" id="patBtn" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5 12 16l2.5-2.5"/></svg>
+          <b>Import patient folder</b>
+          <span>Pick the folder exported from your planning system. CT, MR, structure sets, registrations, plan and dose are found and sorted automatically.</span>
+          <span class="tag">Recommended</span>
+        </button>
+        <button class="card alt" id="filesBtn" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>
+          <b>Load files separately</b>
+          <span>Choose the CT images and structure set yourself, then add extra scans with their registration files.</span>
+          <span class="tag">Manual</span>
+        </button>
+      </div>
+      <input type="file" id="patDir" webkitdirectory multiple style="display:none">
+      <div class="anon">
+        <label><input type="checkbox" id="anonChk" checked> Anonymise on import</label>
+        <small id="anonInfo">Removes names, IDs, dates, institution and private tags as files are read, and remaps UIDs consistently. Text burned into the images is not removed.</small>
+      </div>
+      <div class="engine" id="engineRow"><div class="bar ind" id="engineBar"><i></i></div><span id="engineTxt">Preparing the DICOM engine (first visit downloads ~15 MB)…</span></div>
+      <div class="how">
+        <div><b>1 · Import</b><span>CT + structures, optional MR/CT with registrations, and dose.</span></div>
+        <div><b>2 · Review &amp; annotate</b><span>Rename structures and scans, set dose display, add notes on any plane.</span></div>
+        <div><b>3 · Create atlas</b><span>Choose the slices and content, then export a linked PDF or PowerPoint.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="work">
+    <div id="viewer">
+      <div class="vbar">
+        <div class="seg" role="radiogroup" aria-label="Plane">
+          <label><input type="radio" name="plane" value="ax" checked>Axial</label>
+          <label><input type="radio" name="plane" value="sag">Sagittal</label>
+          <label><input type="radio" name="plane" value="cor">Coronal</label>
+        </div>
+        <span id="imgSel" class="seg" role="radiogroup" aria-label="Scan"></span>
+        <div class="sp"></div>
+        <div class="grp" id="ctWL"><span class="lbl">Window</span>
+          <select id="wl" title="CT window">
+            <option value="400,40">Soft tissue</option>
+            <option value="1600,-600">Lung</option>
+            <option value="2000,300">Bone</option>
+          </select></div>
+        <span id="secWL" title="Window / level for this scan">W <input type="number" id="sw"> L <input type="number" id="sl2"></span>
+        <div class="pop" id="cropPop">
+          <button id="cropBtn" title="Crop the view (applies to every scan)">Crop</button>
+          <div class="menu">
+            <div class="row"><button id="cropAuto" disabled>Body</button><button id="cropRois" disabled>Structures</button></div>
+            <div class="row"><button id="cropDraw" disabled>Draw box</button><button id="cropReset" disabled>Full</button></div>
+            <div class="row"><small>Margin</small> <input type="number" id="cropMargin" value="15" min="0" max="100"> <small>mm</small></div>
+            <span id="cropInfo" class="status"></span>
+          </div>
+        </div>
+        <label class="grp" title="Show crosshair"><input type="checkbox" id="xhair" checked><small>Crosshair</small></label>
+        <button class="icon ghost" id="sideBtn" title="Hide or show the side panel"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg></button>
+        <button class="icon ghost" id="fsBtn" title="Full screen (F)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+      </div>
+      <div id="viewport"><div id="stage"><canvas id="cv"></canvas><div id="notesLayer"></div></div></div>
+      <div class="sbar">
+        <span>Slice</span><input type="range" id="slice" min="0" max="0" value="0"><span id="sl"></span>
+        <span class="keys"><kbd>Scroll</kbd> slice &nbsp; <kbd>A</kbd><kbd>S</kbd><kbd>C</kbd> plane &nbsp; <kbd>T</kbd> next scan &nbsp; <kbd>F</kbd> full screen</span>
+      </div>
+    </div>
+    <aside id="side">
+      <div class="side-scroll">
+        <div class="acc" id="accScans"><button class="acc-h">Scans <span class="cnt" id="cntScans"></span></button>
+          <div class="acc-b"><div id="scanList"></div>
+            <div class="scan-actions"><button id="manageScans">Add or change scans…</button></div></div></div>
+        <div class="acc" id="accDose"><button class="acc-h">Dose <span class="cnt" id="cntDose"></span></button><div class="acc-b"><div id="dosePanel"></div></div></div>
+        <div class="acc" id="accRois"><button class="acc-h">Structures <span class="cnt" id="cntRois"></span></button><div class="acc-b"><div id="rois"></div></div></div>
+        <div class="acc" id="accNotes"><button class="acc-h">Notes <span class="cnt" id="cntNotes"></span></button><div class="acc-b"><div id="notesPanel"></div></div></div>
+      </div>
+      <div class="side-foot">
+        <button id="atlasBtn" class="primary" disabled>Create atlas →</button>
+        <small>Pick slices, scans and structures, then export PDF or PowerPoint.</small>
+      </div>
+    </aside>
+  </section>
+</main>
+
+<div id="filesDlg" class="modal"><div class="panel">
+  <button class="ghost x" id="filesClose" aria-label="Close">×</button>
+  <h3>Load files separately</h3>
+  <p class="sub">Load the CT and its structure set first, then add any extra scans. Dose is loaded from the Dose section once the CT is in.</p>
+  <div class="fstep"><span class="num">1</span><div>
+    <b>Planning CT + structure set</b>
+    <div class="frow"><span class="fl">CT images</span>
+      <span class="pick"><button data-for="ctDir">Choose folder…</button><input type="file" id="ctDir" webkitdirectory multiple></span>
+      <small>or</small>
+      <span class="pick"><button data-for="ctFiles">Choose files…</button><input type="file" id="ctFiles" multiple><span class="fn" id="fn_ct"></span></span></div>
+    <div class="frow"><span class="fl">Structure set</span>
+      <span class="pick"><button data-for="rs">Choose RTSTRUCT…</button><input type="file" id="rs"><span class="fn" id="fn_rs"></span></span></div>
+    <div class="frow"><span class="fl">Display name</span><input type="text" id="name_pri" class="scanName" value="CT"></div>
+    <div class="frow"><span class="fl"></span><button id="go" class="primary" disabled>Load CT</button></div>
+  </div></div>
+  <div class="fstep"><span class="num">2</span><div>
+    <b>Extra scans <small>(optional, up to 4)</small></b>
+    <small>Each scan needs its registration (REG) file unless it shares the CT's frame of reference. A REG can link a scan to the CT or to another loaded scan.</small>
+    <div id="secSlots"></div>
+    <button id="addSec" disabled>+ Add another scan</button>
+  </div></div>
+  <div class="pfoot"><button id="filesDone" class="primary">Done</button></div>
+</div></div>
+
+<div id="busy" role="status" aria-live="polite"><div class="busy-card"><div id="busyTitle">Loading…</div><div class="bar"><i id="busyBar"></i></div><div id="busyTxt"></div></div></div>
+<div id="toasts" aria-live="polite"></div>
+<div id="logDrawer"><div class="lh">Technical log <button class="ghost" id="logClose">Close</button></div><pre id="log">Loading the DICOM engine…</pre></div>
 
 <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
@@ -772,7 +1054,27 @@ def remove_dose():
     return 'ok'
 `;
 const $ = id => document.getElementById(id);
-const log = m => { $('log').textContent += '\n' + m; $('log').scrollTop = 1e9; };
+const log = m => {
+  $('log').textContent += '\n' + m; $('log').scrollTop = 1e9;
+  if (/^(ERROR|WARNING)/.test(String(m))) toast(String(m).replace(/^ERROR( [^:]*)?:\s*/, ''), 'error');
+};
+// ---------- minimal progress overlay + toasts ----------
+let busyBatch = false;
+function busy(title, frac, txt) {
+  $('busy').classList.add('open');
+  if (title != null) $('busyTitle').textContent = title;
+  const bar = $('busyBar').parentElement;
+  bar.classList.toggle('ind', frac == null);
+  $('busyBar').style.width = frac == null ? '' : Math.round(Math.max(0, Math.min(1, frac)) * 100) + '%';
+  $('busyTxt').textContent = txt || '';
+}
+function busyDone(force) { if (!busyBatch || force) $('busy').classList.remove('open'); }
+const paint = () => new Promise(r => requestAnimationFrame(() => setTimeout(r)));
+function toast(msg, kind, ms) {
+  const t = document.createElement('div'); t.className = 'toast ' + (kind || '');
+  t.textContent = msg; $('toasts').appendChild(t);
+  setTimeout(() => t.remove(), ms || (kind === 'error' ? 9000 : 4500));
+}
 let py, meta = null, rois = [];
 let pos = {k: 0, r: 0, c: 0};          // cursor in primary voxel indices (slice, row, col)
 let crop = null;                        // {c0,c1,r0,r1,k0,k1} inclusive, primary voxel indices
@@ -787,18 +1089,22 @@ const secs = {};                         // id -> {shown, loaded, label, ww, wl,
 
 (async () => {
   try {
+    $('engineTxt').textContent = 'Loading the Python engine…';
     py = await loadPyodide();
+    $('engineTxt').textContent = 'Installing DICOM tools…';
     log('Pyodide ' + py.version + ' loaded. Installing numpy + pydicom…');
     await py.loadPackage(['numpy', 'micropip']);
     await py.runPythonAsync("import micropip\nawait micropip.install('pydicom')");
     await py.runPythonAsync(PY);
     log('pydicom ' + py.runPython('pydicom.__version__') + ' ready. Import a patient folder, or choose CT + RTSTRUCT and Load primary.');
-    $('go').disabled = false; $('patBtn').disabled = false;
-  } catch (e) { log('ERROR: ' + e); }
+    $('go').disabled = false; $('patBtn').disabled = false; $('filesBtn').disabled = false;
+    $('engine').textContent = 'Ready'; $('engine').title = 'DICOM engine ready. Files are processed on this computer and never uploaded.'; $('engine').classList.add('ready');
+    $('engineRow').style.display = 'none';
+  } catch (e) { log('ERROR: ' + e); $('engineTxt').textContent = 'The DICOM engine failed to load. Check the internet connection and reload.'; $('engine').textContent = 'Engine error'; }
 })();
 
 // Stream files into Python one at a time (each is parsed then deleted) to keep memory low
-async function ingestFiles(files, tag, downsample) {
+async function ingestFiles(files, tag, downsample, label) {
   py.globals.get('ingest_begin')(tag, files.length, downsample);
   const ing = py.globals.get('ingest');
   py.FS.mkdirTree('/data');
@@ -808,7 +1114,7 @@ async function ingestFiles(files, tag, downsample) {
     py.FS.writeFile(p, new Uint8Array(await files[i].arrayBuffer()));
     const m = ing(tag, p);
     counts[m] = (counts[m] || 0) + 1;
-    if (i % 50 === 49) { log(`  read ${i + 1} / ${files.length}`); await new Promise(r => setTimeout(r)); }
+    if (i % 20 === 19 || i === files.length - 1) { busy(null, (i + 1) / files.length, `${label || 'Reading'}: ${i + 1} of ${files.length} files`); await paint(); }
   }
   log('  files by type: ' + JSON.stringify(counts));
 }
@@ -833,13 +1139,15 @@ function anonSalt() {
 let anonOn = true;
 async function loadPrimaryFrom(ctFiles, rsFile) {
   try {
-    if (!ctFiles.length) { log('Pick CT files first.'); return false; }
+    if (!ctFiles.length) { toast('Choose the CT images first.', 'error'); return false; }
+    busy('Loading planning CT', 0, '');
     anonOn = $('anonChk').checked;
     py.globals.get('set_anon')(anonOn, anonSalt());
     $('anonInfo').textContent = anonOn ? 'Data in this session is anonymised as it is read (names, IDs, dates removed; UIDs remapped).' : 'Not anonymised.';
     const t = performance.now();
     log(`Reading ${ctFiles.length} primary files…`);
-    await ingestFiles(ctFiles, 'pri', false);
+    await ingestFiles(ctFiles, 'pri', false, 'Reading CT');
+    busy('Loading planning CT', null, rsFile ? 'Building volume and structures…' : 'Building volume…'); await paint();
     const rsPath = await writeOne(rsFile, 'rs');
     const res = JSON.parse(py.globals.get('load')(rsPath));
     meta = res.info;
@@ -857,22 +1165,27 @@ async function loadPrimaryFrom(ctFiles, rsFile) {
     ['cropAuto', 'cropDraw', 'cropReset', 'addSec', 'atlasBtn'].forEach(id => $(id).disabled = false);
     $('cropRois').disabled = !rois.length;
     cropAuto();                       // CTs come in with a lot of air/couch: crop by default
+    if (typeof uiLoaded === 'function') uiLoaded();
+    busyDone();
     return true;
-  } catch (e) { log('ERROR: ' + e); console.error(e); return false; }
+  } catch (e) { busyDone(true); log('ERROR: ' + e); console.error(e); return false; }
 }
 $('go').onclick = () => loadPrimaryFrom([...$('ctDir').files, ...$('ctFiles').files], $('rs').files[0]);
 
 // ---------- secondary slots ----------
 function initSlots() {
   $('secSlots').innerHTML = SLOT_IDS.map((id, n) => `
-    <fieldset class="sec" id="slot_${id}" style="display:none"><legend>Scan ${n + 2} <b id="lab_${id}"></b> &nbsp; <label id="nmw_${id}" style="display:none">Display name <input type="text" id="name_${id}" class="scanName"></label></legend>
-      <label>Image folder: <input type="file" id="dir_${id}" webkitdirectory multiple></label>
-      <label>or files: <input type="file" id="files_${id}" multiple></label>
-      <label>REG file: <input type="file" id="reg_${id}"></label>
-      <label><input type="checkbox" id="inv_${id}"> invert</label>
-      <button id="load_${id}">Load</button><button id="rm_${id}">Remove</button>
-      <span class="status" id="st_${id}"></span>
+    <fieldset class="sec" id="slot_${id}" style="display:none"><legend>Scan ${n + 2} <b id="lab_${id}"></b></legend>
+      <div class="frow"><span class="fl">Images</span>
+        <span class="pick"><button data-for="dir_${id}">Choose folder…</button><input type="file" id="dir_${id}" webkitdirectory multiple></span><small>or</small>
+        <span class="pick"><button data-for="files_${id}">Choose files…</button><input type="file" id="files_${id}" multiple><span class="fn" id="fn_dir_${id}"></span></span></div>
+      <div class="frow"><span class="fl">Registration</span>
+        <span class="pick"><button data-for="reg_${id}">Choose REG…</button><input type="file" id="reg_${id}"><span class="fn" id="fn_reg_${id}"></span></span>
+        <label title="Debug option: apply the registration the other way round"><input type="checkbox" id="inv_${id}"> <small>invert</small></label></div>
+      <div class="frow" id="nmw_${id}" style="display:none"><span class="fl">Display name</span><input type="text" id="name_${id}" class="scanName"></div>
+      <div class="frow"><span class="fl"></span><button id="load_${id}" class="primary">Load scan</button><button id="rm_${id}">Remove</button><span class="status" id="st_${id}"></span></div>
     </fieldset>`).join('');
+  if (typeof wirePickers === 'function') wirePickers($('secSlots'));
   SLOT_IDS.forEach(id => {
     secs[id] = {shown: false, loaded: false, label: '', ww: 0, wl: 0, status: ''};
     $('load_' + id).onclick = () => loadSecondary(id);
@@ -891,12 +1204,14 @@ async function loadSecondary(id) {
 }
 async function loadSecondaryFrom(id, files, regFile) {
   try {
-    if (!files.length) { log(`Scan ${id}: pick image files first.`); return false; }
+    if (!files.length) { toast('Choose the images for this scan first.', 'error'); return false; }
+    busy(`Loading scan ${SLOT_IDS.indexOf(id) + 2}`, 0, '');
     showSlot(id);
     secs[id].loaded = false; if (current === id) current = 'pri'; buildImgSel(); draw();
     const t = performance.now();
     log(`Reading ${files.length} files for ${id}…`);
-    await ingestFiles(files, id, true);
+    await ingestFiles(files, id, true, 'Reading images');
+    busy(null, null, 'Resampling and registering…'); await paint();
     const regPath = await writeOne(regFile, 'reg');
     const res = JSON.parse(py.globals.get('load_secondary')(id, regPath, $('inv_' + id).checked));
     const info = res.info;
@@ -906,8 +1221,9 @@ async function loadSecondaryFrom(id, files, regFile) {
     $('name_' + id).value = secs[id].label; $('nmw_' + id).style.display = '';
     applyResolve(res.all);
     current = id; buildImgSel(); draw();
+    busyDone();
     return true;
-  } catch (e) { log('ERROR: ' + e); console.error(e); return false; }
+  } catch (e) { busyDone(true); log('ERROR: ' + e); console.error(e); return false; }
 }
 function removeSecondary(id) {
   imgGen++;
@@ -947,7 +1263,7 @@ function buildImgSel() {
 }
 function syncWL() {
   const s = secs[current];
-  $('secWL').style.opacity = s ? 1 : .4;
+  $('secWL').style.display = s ? 'inline-flex' : 'none'; $('ctWL').style.display = s ? 'none' : '';
   $('sw').disabled = $('sl2').disabled = !s;
   if (s) { $('sw').value = s.ww; $('sl2').value = s.wl; }
 }
@@ -1108,7 +1424,7 @@ function closeMkMenu() { const m = $('mkMenu'); if (m) m.remove(); mkMenuFor = n
 function startFreeDraw(n, p) {
   freeDraw = {n, p, pts: null}; activeNote = n;
   $('cv').classList.add('drawing');
-  log('Free draw: drag on the image to draw the outline (Esc cancels).');
+  toast('Free draw: drag on the image to draw the outline. Esc cancels.');
 }
 function endFreeDraw() { freeDraw = null; $('cv').classList.remove('drawing'); }
 
@@ -1222,11 +1538,12 @@ function renderNotesPanel() {
   const p = radio('plane'), g = planeGeom(p), which = curWhich();
   const sorted = [...notes].sort((a, b) => a.scan.localeCompare(b.scan) || a.home.localeCompare(b.home) || noteIdx(a, a.home) - noteIdx(b, b.home));
   const nHere = notes.filter(n => noteShown(n, p, g.idx, which)).length;
-  el.innerHTML = `<b>Notes</b> <small>(${notes.length} total, ${nHere} on this slice)</small><br>
-    <button id="addNote">+ Add note</button> <small>Click a box to edit (tick "Show on" planes above it); drag a box or marker to move it. Click a marker to change it (dot, arrow, circle/ellipse, free draw). Esc finishes.</small>
+  if ($('cntNotes')) $('cntNotes').textContent = notes.length ? `${notes.length} · ${nHere} here` : '';
+  el.innerHTML = `<button id="addNote" class="primary">+ Add note</button>
+    <small class="nhint">Click the point, then where the text goes. Click a box to edit it and tick the planes it shows on. Click a marker to change it to an arrow, circle/ellipse or free drawing. Esc finishes.</small>
     <div class="nl">${sorted.map(n => {
-      const planes = ['ax', 'sag', 'cor'].filter(q => n.views[q] && n.views[q].on).map(q => `<a class="njp" data-p="${q}" title="Show on ${PLANE_NAME[q]}">${PLANE_SHORT[q]}</a>`).join(' ');
-      return `<div class="ni ${noteShown(n, p, g.idx, which) ? 'here' : ''}" data-id="${n.id}">${esc(scanName(n.scan))} · ${PLANE_NAME[n.home]} ${noteIdx(n, n.home) + 1} <small>(${planes})</small>: <span style="color:#aaa">${esc((n.text || '(empty)').slice(0, 60))}</span></div>`;
+      const planes = ['ax', 'sag', 'cor'].filter(q => n.views[q] && n.views[q].on).map(q => `<a class="njp" data-p="${q}" title="Go to it on ${PLANE_NAME[q]}">${PLANE_SHORT[q]}</a>`).join(' ');
+      return `<div class="ni ${noteShown(n, p, g.idx, which) ? 'here' : ''}" data-id="${n.id}"><span class="nm">${esc(scanName(n.scan))} · ${PLANE_NAME[n.home]} ${noteIdx(n, n.home) + 1} · ${planes}</span><span class="nt">${esc((n.text || '(empty)').slice(0, 80))}</span></div>`;
     }).join('')}</div>`;
   $('addNote').onclick = () => { if (noteMode) cancelNote(); else setNoteMode(true); };
   if (noteMode) { $('addNote').classList.add('on'); $('addNote').textContent = noteMode === 'anchor' ? 'Click the point on the image…' : 'Now click where the text box goes…'; }
@@ -1319,16 +1636,16 @@ function finishFreeDraw() {
 // ---------- structure panel ----------
 function buildRoiPanel() {
   const el = $('rois');
-  el.innerHTML = `<b>${rois.length} structures</b><br>
-    <button id="allOn">All on</button><button id="allOff">All off</button>
-    &nbsp; Line width, all: <input type="range" id="lw" min="0.5" max="5" step="0.5" value="${lineWidth}" style="width:90px"> <span id="lwv">${lineWidth}</span>
+  if (!rois.length) { el.innerHTML = '<small>No structure set loaded.</small>'; return; }
+  el.innerHTML = `<div class="rtools"><button id="allOn">Show all</button><button id="allOff">Hide all</button>
+    <span class="lwall" title="Set the line width of every structure">Width, all <input type="range" id="lw" min="0.5" max="5" step="0.5" value="${lineWidth}" style="width:70px"> <span id="lwv">${lineWidth}</span></span></div>
     <table>${rois.map((r, i) => `<tr>
       <td><input type="checkbox" data-i="${i}" class="vis" ${r.visible ? 'checked' : ''}></td>
       <td><input type="color" data-i="${i}" class="col" value="${hex(r.color)}"></td>
       <td><input type="text" data-i="${i}" class="nm" value="${esc(r.name)}" title="Original: ${esc(r.origName)}"></td>
-      <td><input type="number" data-i="${i}" class="lwi" min="0.5" max="6" step="0.5" value="${r.lw ?? lineWidth}" title="Line width for this structure"></td>
-      <td><small>${r.nContours} contours</small></td>
-      <td><button data-i="${i}" class="go" title="Jump to centre slice">&#8982;</button></td></tr>`).join('')}</table>`;
+      <td><input type="number" data-i="${i}" class="lwi" min="0.5" max="6" step="0.5" value="${r.lw ?? lineWidth}" title="Line width"></td>
+      <td><button data-i="${i}" class="go" title="Go to this structure (${r.nContours} contours)">&#8982;</button></td></tr>`).join('')}</table>
+    <small>Click a name to rename it for the atlas. The number sets its line width.</small>`;
   el.querySelectorAll('.vis').forEach(x => x.onchange = e => { rois[+e.target.dataset.i].visible = e.target.checked; draw(); });
   el.querySelectorAll('.col').forEach(x => x.oninput = e => { rois[+e.target.dataset.i].color = unhex(e.target.value); draw(); });
   el.querySelectorAll('.nm').forEach(x => x.oninput = e => {
@@ -1368,7 +1685,7 @@ $('cropAuto').onclick = cropAuto;
 $('cropReset').onclick = () => setCrop(fullCrop(), 'Full');
 $('cropRois').onclick = () => {
   const vis = rois.filter(r => r.visible && r.ks.length);
-  if (!vis.length) return log('No visible structures to crop to.');
+  if (!vis.length) return toast('No visible structures to crop to.', 'error');
   let c0 = 1e9, c1 = -1e9, r0 = 1e9, r1 = -1e9, k0 = 1e9, k1 = -1e9;
   for (const r of vis) for (const k of r.ks) {
     k0 = Math.min(k0, k); k1 = Math.max(k1, k);
@@ -1463,7 +1780,7 @@ function draw(overlay) {
   }
 
   const dpr = window.devicePixelRatio || 1;
-  const maxW = Math.min(window.innerWidth - 380, 760), maxH = window.innerHeight * 0.8;
+  const vp = $('viewport'), maxW = Math.max(200, vp.clientWidth - 24), maxH = Math.max(200, vp.clientHeight - 24);
   const scale = Math.min(maxW / g.mmW, maxH / g.mmH);
   const cssW = Math.round(g.mmW * scale), cssH = Math.round(g.mmH * scale);
   const cv = $('cv');
@@ -1584,5 +1901,6 @@ $('cv').addEventListener('wheel', e => {
 <script src="dose.js"></script>
 <script src="atlas.js"></script>
 <script src="import.js"></script>
+<script src="ui.js"></script>
 </body>
 </html>

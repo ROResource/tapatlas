@@ -25,9 +25,10 @@ function levelLabel(pct) { return dose.units === 'rel' ? `${+pct.toFixed(1)}%` :
 // ---------- loading ----------
 async function loadDoseFrom(files) {
   try {
-    if (!meta) { log('Load the primary scan before the dose.'); return false; }
-    if (!files.length) { log('Pick an RTDOSE file (optionally with its RTPLAN).'); return false; }
+    if (!meta) { toast('Load the CT before the dose.', 'error'); return false; }
+    if (!files.length) { toast('Choose an RTDOSE file (and its RTPLAN if you have it).', 'error'); return false; }
     log(`Reading ${files.length} dose/plan file(s)…`);
+    busy('Loading dose', null, 'Reading the dose grid…'); await paint();
     const paths = [];
     for (const f of files) paths.push(await writeOne(f, 'dose'));
     const info = JSON.parse(py.globals.get('load_dose')(JSON.stringify(paths)));
@@ -36,9 +37,10 @@ async function loadDoseFrom(files) {
             wash: {lo: 30, hi: 100}, iso: ISO_DEFAULT.map(([pct, color]) => ({on: true, pct, color, w: 2})),
             planes: new Map(), isoCache: new Map()};
     if (dose.mode === 'off') dose.mode = 'wash';
-    renderDosePanel(); draw();
+    renderDosePanel(); draw(); busyDone();
+    const acc = $('accDose'); if (acc) acc.classList.remove('closed');
     return true;
-  } catch (e) { log('ERROR loading dose: ' + e); console.error(e); return false; }
+  } catch (e) { busyDone(true); log('ERROR loading dose: ' + e); console.error(e); return false; }
 }
 function removeDose() {
   if (doseReady()) py.globals.get('remove_dose')();
@@ -159,10 +161,10 @@ function doseReadout(e) {
 function renderDosePanel() {
   const el = $('dosePanel'); if (!el) return;
   if (!meta) { el.innerHTML = ''; return; }
-  const loadRow = `<b>Dose</b> <label>RTDOSE (+ RTPLAN): <input type="file" id="doseFile" multiple></label>
-    <button id="doseLoad">Load dose</button>${doseReady() ? ' <button id="doseRm">Remove</button>' : ''}`;
+  const loadRow = `<div class="frow dload"><span class="pick"><button data-for="doseFile">${doseReady() ? 'Replace…' : 'Choose RTDOSE…'}</button><input type="file" id="doseFile" multiple></span>
+    <span class="fn"></span><button id="doseLoad" class="${doseReady() ? '' : 'primary'}" style="display:none">Load</button>${doseReady() ? '<button id="doseRm" class="ghost">Remove</button>' : ''}</div>`;
   if (!doseReady()) {
-    el.innerHTML = loadRow + '<br><small>Total (plan) dose. Per-beam dose files are summed if there is no plan dose.</small>';
+    el.innerHTML = loadRow + '<small>Select the RTDOSE file, and the RTPLAN too if you want the prescription. Shows the total plan dose; per-beam doses are added together.</small>';
   } else {
     const I = dose.info, u = unitLabel(), rx = I.rx && I.rx.dose;
     const warn = I.status === 'UNREGISTERED' ? '<div class="bad">Not linked to the primary (different frame of reference, no REG): shown unregistered.</div>' : '';
@@ -170,23 +172,25 @@ function renderDosePanel() {
     <div class="dinfo">${esc(I.sum ? I.sum.toLowerCase() + ' dose' : 'dose')}${I.nFiles > 1 ? ` (${I.nFiles} files summed)` : ''}, max ${fmtGy(I.max)} Gy,
       grid ${I.ps[1].toFixed(1)} × ${I.ps[0].toFixed(1)} × ${Math.abs(I.gap).toFixed(1)} mm${rx ? `<br>Prescription ${fmtGy(rx)} Gy${I.rx.fx ? ' in ' + I.rx.fx + ' fractions' : ''} (${esc(I.rx.label || 'RTPLAN')})` : ''}
       ${I.notes.length ? '<br>' + I.notes.map(esc).join(' ') : ''}</div>${warn}
-    <div class="drow">Display <label><input type="radio" name="dMode" value="off" ${dose.mode === 'off' ? 'checked' : ''}>Off</label>
+    <div class="drow"><span class="dl">Display</span><span class="seg"><label><input type="radio" name="dMode" value="off" ${dose.mode === 'off' ? 'checked' : ''}>Off</label>
       <label><input type="radio" name="dMode" value="wash" ${dose.mode === 'wash' ? 'checked' : ''}>Colourwash</label>
-      <label><input type="radio" name="dMode" value="iso" ${dose.mode === 'iso' ? 'checked' : ''}>Isolines</label></div>
-    <div class="drow">Units <label><input type="radio" name="dUnits" value="abs" ${dose.units === 'abs' ? 'checked' : ''}>Gy</label>
-      <label><input type="radio" name="dUnits" value="rel" ${dose.units === 'rel' ? 'checked' : ''}>% of reference</label></div>
-    <div class="drow">Reference dose <input type="number" id="dRef" step="0.01" min="0.01" value="${fmtGy(dose.ref)}"> Gy
-      <button id="dRefMax" title="Maximum dose">Max ${fmtGy(I.max)}</button>${rx ? `<button id="dRefRx" title="Prescription from the plan">Rx ${fmtGy(rx)}</button>` : ''}</div>
-    ${dose.mode === 'wash' ? `<div class="drow">Lower <input type="number" id="dLo" step="any" value="${pctToShown(dose.wash.lo)}"> Upper <input type="number" id="dHi" step="any" value="${pctToShown(dose.wash.hi)}"> ${u}
-      &nbsp; Opacity <input type="range" id="dAlpha" min="0.1" max="0.9" step="0.05" value="${dose.alpha}" style="width:70px"></div>` : ''}
+      <label><input type="radio" name="dMode" value="iso" ${dose.mode === 'iso' ? 'checked' : ''}>Isolines</label></span></div>
+    <div class="drow"><span class="dl">Units</span><span class="seg"><label><input type="radio" name="dUnits" value="abs" ${dose.units === 'abs' ? 'checked' : ''}>Gy</label>
+      <label><input type="radio" name="dUnits" value="rel" ${dose.units === 'rel' ? 'checked' : ''}>% of reference</label></span></div>
+    <div class="drow"><span class="dl">Reference</span><input type="number" id="dRef" step="0.01" min="0.01" value="${fmtGy(dose.ref)}"> Gy
+      ${rx ? `<button id="dRefRx" title="Use the prescription from the plan">Rx ${fmtGy(rx)}</button>` : ''}<button id="dRefMax" title="Use the maximum dose">Max ${fmtGy(I.max)}</button></div>
+    ${dose.mode === 'wash' ? `<div class="drow"><span class="dl">Range (${u})</span><input type="number" id="dLo" step="any" value="${pctToShown(dose.wash.lo)}" title="Lower dose"> to <input type="number" id="dHi" step="any" value="${pctToShown(dose.wash.hi)}" title="Upper dose"></div>
+      <div class="drow"><span class="dl">Opacity</span><input type="range" id="dAlpha" min="0.1" max="0.9" step="0.05" value="${dose.alpha}" style="width:120px"></div>` : ''}
     ${dose.mode === 'iso' ? `<table class="diso"><tr><th></th><th>Level (${u})</th><th>Colour</th><th>Line</th></tr>${dose.iso.map((l, i) => `<tr>
       <td><input type="checkbox" class="dOn" data-i="${i}" ${l.on ? 'checked' : ''}></td>
       <td><input type="number" class="dLv" data-i="${i}" step="any" value="${pctToShown(l.pct)}"></td>
       <td><input type="color" class="dCol" data-i="${i}" value="${l.color}"></td>
       <td><select class="dW" data-i="${i}">${[[1, 'Thin'], [2, 'Medium'], [3, 'Thick']].map(([v, t]) => `<option value="${v}" ${l.w === v ? 'selected' : ''}>${t}</option>`).join('')}</select></td></tr>`).join('')}</table>
       <small>Levels are % of the reference dose, so they move with it.</small>` : ''}
-    <div class="drow"><button id="dMax">Jump to max</button> <span id="doseRead" style="color:#9cf"></span></div>`;
+    <div class="drow"><button id="dMax">Go to max dose</button> <span id="doseRead"></span></div>`;
   }
+  wirePickers(el);
+  $('doseFile').addEventListener('change', () => { if ($('doseFile').files.length) loadDoseFrom([...$('doseFile').files]); });
   $('doseLoad').onclick = () => loadDoseFrom([...$('doseFile').files]);
   if (!doseReady()) return;
   $('doseRm').onclick = removeDose;
