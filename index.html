@@ -344,12 +344,8 @@ fieldset.sec label{margin-right:var(--s3)}
         <span id="imgSel" class="seg" role="radiogroup" aria-label="Scan"></span>
         <div class="sp"></div>
         <div class="grp" id="ctWL"><span class="lbl">Window</span>
-          <select id="wl" title="CT window">
-            <option value="400,40">Soft tissue</option>
-            <option value="1600,-600">Lung</option>
-            <option value="2000,300">Bone</option>
-          </select></div>
-        <span id="secWL" title="Window / level for this scan">W <input type="number" id="sw"> L <input type="number" id="sl2"></span>
+          <select id="wl" title="Window for this scan"></select>
+          <span id="secWL" title="Manual window / level">W <input type="number" id="sw" min="1"> L <input type="number" id="sl2"></span></div>
         <div class="pop" id="cropPop">
           <button id="cropBtn" title="Crop the view (applies to every scan)">Crop</button>
           <div class="menu">
@@ -714,6 +710,7 @@ def load(rs_path):
                             nContours=sum(len(v) for v in per_slice.values()), nPoints=npts, slices=per_slice))
         P['info']['unmatchedContours'] = unmatched
     P['info']['A'] = np.round(P['A'], 5).tolist()     # voxel -> patient, for slice positions in the atlas
+    P['info'].update(scan_window(P))
     return json.dumps(dict(info=P['info'], rois=out))
 
 # ---------------- registration ----------------
@@ -803,6 +800,33 @@ def resolve_all():
         out[sid] = dict(status=status, notes=notes, primaryToSecondary=np.round(T, 4).tolist())
     return out
 
+def scan_window(S):
+    """Default display window: the one stored in the images (WindowWidth/Center, as acquired/exported),
+    else soft tissue for CT, else a percentile window."""
+    dw = dl = None
+    sl = S['slices']
+    for d in (sl[len(sl) // 2], sl[0]):
+        try:
+            w, c = d.WindowWidth, d.WindowCenter
+            w = float(w[0] if isinstance(w, (list, tuple)) or hasattr(w, '__len__') and not isinstance(w, str) else w)
+            c = float(c[0] if isinstance(c, (list, tuple)) or hasattr(c, '__len__') and not isinstance(c, str) else c)
+            if w > 1:
+                dw, dl = w, c; break
+        except Exception:
+            pass
+    if dw is not None:
+        src = 'dicom'
+        ww, wl = dw, dl
+    else:
+        v = S['vol'][::max(1, S['vol'].shape[0] // 20)].astype(np.float32)
+        lo, hi = np.nanpercentile(v, [1, 99.5])
+        src = 'auto'
+        ww, wl = float(hi - lo), float((hi + lo) / 2)
+    dflt = dict(ww=round(ww, 1), wl=round(wl, 1), src=src)
+    if S['info']['modality'] == 'CT' and src != 'dicom':
+        ww, wl = 400.0, 40.0
+    return dict(autoW=round(ww, 1), autoL=round(wl, 1), winDefault=dflt)
+
 def load_secondary(tag, reg_path, invert):
     reg = read_dcm(reg_path) if reg_path else None
     if reg is None:   # fall back to a REG sitting in the secondary folder
@@ -819,10 +843,7 @@ def load_secondary(tag, reg_path, invert):
     SEC[tag] = S
     if reg is not None:
         REGS[tag] = reg
-    v = S['vol'][::max(1, S['vol'].shape[0] // 20)].astype(np.float32)
-    lo, hi = np.percentile(v, [1, 99.5])
-    info = dict(S['info'], hasREG=reg is not None,
-                autoW=float(round(hi - lo, 1)), autoL=float(round((hi + lo) / 2, 1)))
+    info = dict(S['info'], hasREG=reg is not None, **scan_window(S))
     return json.dumps(dict(info=info, all=resolve_all()))
 
 def set_invert(tag, invert):
@@ -1155,6 +1176,9 @@ async function loadPrimaryFrom(ctFiles, rsFile) {
       ks: Object.keys(r.slices).map(Number).sort((a, b) => a - b)}));
     log(`Primary parsed in ${((performance.now()-t)/1000).toFixed(1)} s\n` + JSON.stringify(meta));
     pos = {k: Math.floor(meta.n / 2), r: Math.floor(meta.rows / 2), c: Math.floor(meta.cols / 2)};
+    // planning CT opens in soft tissue (as before); other primaries use the window stored in the images
+    priWin = meta.modality === 'CT' ? {ww: 400, wl: 40, mod: 'CT', def: meta.winDefault, sel: 'p:400,40'}
+                                    : {ww: meta.autoW, wl: meta.autoL, mod: meta.modality, def: meta.winDefault, sel: 'def'};
     crop = null; current = 'pri';
     notes = []; pruneNoteEls(); noteMode = null; activeNote = null; closeMkMenu(); renderNotesPanel();
     if (typeof dose !== 'undefined' && dose) { py.globals.get('remove_dose')(); dose = null; }
@@ -1216,7 +1240,9 @@ async function loadSecondaryFrom(id, files, regFile) {
     const res = JSON.parse(py.globals.get('load_secondary')(id, regPath, $('inv_' + id).checked));
     const info = res.info;
     log(`${id} parsed in ${((performance.now()-t)/1000).toFixed(1)} s\n` + JSON.stringify(info));
-    Object.assign(secs[id], {loaded: true, label: info.series || info.modality, ww: info.autoW, wl: info.autoL});
+    const wd = info.winDefault;
+    Object.assign(secs[id], {loaded: true, label: info.series || info.modality, ww: info.autoW, wl: info.autoL, mod: info.modality, def: wd,
+      sel: wd && wd.ww === info.autoW && wd.wl === info.autoL ? 'def' : (info.modality === 'CT' ? 'p:400,40' : 'custom')});
     $('lab_' + id).textContent = `${info.modality} · ${info.series || ''}`;
     $('name_' + id).value = secs[id].label; $('nmw_' + id).style.display = '';
     applyResolve(res.all);
@@ -1261,14 +1287,41 @@ function buildImgSel() {
   document.querySelectorAll('input[name=img]').forEach(r => r.onchange = e => { current = e.target.value; syncWL(); draw(); renderNotesPanel(); });
   syncWL();
 }
-function syncWL() {
-  const s = secs[current];
-  $('secWL').style.display = s ? 'inline-flex' : 'none'; $('ctWL').style.display = s ? 'none' : '';
-  $('sw').disabled = $('sl2').disabled = !s;
-  if (s) { $('sw').value = s.ww; $('sl2').value = s.wl; }
+// ---------- window / level ----------
+// Every scan keeps its own window. CT: presets + the window stored in the images + manual.
+// MR and others: the stored ("as acquired") window + manual, since fixed presets don't transfer between MR scans.
+const CT_PRESETS = [['Soft tissue', 400, 40], ['Lung', 1600, -600], ['Bone', 2000, 300], ['Mediastinum', 350, 40], ['Brain', 80, 40], ['Liver', 150, 60]];
+let priWin = {ww: 400, wl: 40, mod: 'CT', def: null, sel: 'p:400,40'};
+const winOf = id => id === 'pri' ? priWin : secs[id];
+const fmtW = v => +(+v).toFixed(1);
+function winOptions(w) {
+  const o = [];
+  if (w.def) o.push(['def', w.def.src === 'dicom' ? 'Scan default' : 'Scan default (auto)']);
+  if (w.mod === 'CT') CT_PRESETS.forEach(([n, a, b]) => o.push([`p:${a},${b}`, n]));
+  o.push(['custom', 'Manual']);
+  return o;
 }
-$('sw').oninput = () => { if (secs[current]) { secs[current].ww = +$('sw').value; draw(); } };
-$('sl2').oninput = () => { if (secs[current]) { secs[current].wl = +$('sl2').value; draw(); } };
+function syncWL() {
+  const w = winOf(curWhich()); if (!w) return;
+  const opts = winOptions(w);
+  if (!opts.some(([v]) => v === w.sel)) w.sel = 'custom';
+  $('wl').innerHTML = opts.map(([v, l]) => {
+    const t = v === 'def' ? `${fmtW(w.def.ww)} / ${fmtW(w.def.wl)}` : v.startsWith('p:') ? v.slice(2).replace(',', ' / ') : '';
+    return `<option value="${v}" ${v === w.sel ? 'selected' : ''}>${l}${t && v === 'def' ? ` (${t})` : ''}</option>`;
+  }).join('');
+  $('wl').title = `Window ${fmtW(w.ww)} / level ${fmtW(w.wl)}`;
+  $('sw').value = fmtW(w.ww); $('sl2').value = fmtW(w.wl);
+  $('secWL').style.display = w.sel === 'custom' ? 'inline-flex' : 'none';
+}
+$('wl').onchange = () => {
+  const w = winOf(curWhich()), v = $('wl').value;
+  w.sel = v;
+  if (v === 'def') { w.ww = w.def.ww; w.wl = w.def.wl; }
+  else if (v.startsWith('p:')) [w.ww, w.wl] = v.slice(2).split(',').map(Number);
+  syncWL(); draw();
+};
+$('sw').oninput = () => { const w = winOf(curWhich()); if (+$('sw').value > 0) { w.ww = +$('sw').value; w.sel = 'custom'; draw(); } };
+$('sl2').oninput = () => { const w = winOf(curWhich()); w.wl = +$('sl2').value; w.sel = 'custom'; draw(); };
 function selectImage(v) { current = v; buildImgSel(); draw(); renderNotesPanel(); }
 
 $('name_pri').oninput = e => { priName = e.target.value; buildImgSel(); draw(); renderNotesPanel(); };
@@ -1769,7 +1822,7 @@ function draw(overlay) {
   if (!meta) return;
   const p = radio('plane'), g = planeGeom(p);
   const which = secs[current] && secs[current].loaded ? current : 'pri';
-  const [ww, wl] = which !== 'pri' ? [secs[which].ww, secs[which].wl] : $('wl').value.split(',').map(Number);
+  const {ww, wl} = winOf(which);
   const ikey = `${imgGen}|${p}|${g.idx}|${ww}|${wl}|${which}|${g.w}x${g.h}`;
   if (viewImg.key !== ikey) {          // only ask Python for a new plane when something changed
     const proxy = py.globals.get('plane_rgba')(p, g.idx, ww, wl, which);
@@ -1878,7 +1931,7 @@ $('cv').addEventListener('click', e => {
   draw();
 });
 $('slice').oninput = e => { setIdx(radio('plane'), +e.target.value); draw(); renderNotesPanel(); };
-$('wl').onchange = () => draw(); $('xhair').onchange = () => draw();
+$('xhair').onchange = () => draw();
 document.querySelectorAll('input[name=plane]').forEach(r => r.onchange = () => { syncSlider(); draw(); });
 window.addEventListener('resize', () => draw());
 document.addEventListener('keydown', e => {

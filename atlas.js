@@ -29,7 +29,7 @@ function atlasSync() {
   }
   // scans: primary, extra CT windows, then loaded secondaries (keep existing settings)
   const old = Object.fromEntries(atlas.scans.map(s => [s.key, s]));
-  const [ctW, ctL] = $('wl').value.split(',').map(Number);
+  const ctW = priWin.ww, ctL = priWin.wl;
   const list = [old.pri || {key: 'pri', base: 'pri', kind: 'pri', include: true, planes: {ax: true, sag: true, cor: true}, ww: ctW, wl: ctL}];
   atlas.scans.filter(s => s.kind === 'win').forEach(s => list.push(s));
   for (const id of loadedIds())
@@ -324,7 +324,7 @@ function initThumbs() {
   }
 }
 function refreshThumbImgs() {     // base images through the centre of the box being edited
-  const v = atlas.voi[atlas.edit], [ww, wl] = $('wl').value.split(',').map(Number);
+  const v = atlas.voi[atlas.edit], {ww, wl} = priWin;
   const mid = {ax: Math.round((v.k0 + v.k1) / 2), sag: Math.round((v.c0 + v.c1) / 2), cor: Math.round((v.r0 + v.r1) / 2)};
   for (const p of APLANES) {
     const t = thumbGeom(p);
