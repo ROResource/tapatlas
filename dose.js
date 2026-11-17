@@ -17,10 +17,12 @@ function getWashLut() {
 }
 const doseReady = () => !!(dose && dose.info);
 const fmtGy = v => (Math.round(v * 100) / 100).toFixed(2);
+// absolute dose unit: Gy, unless the RTDOSE is stored in relative units
+const DU = () => dose && dose.info && dose.info.units && dose.info.units !== 'GY' ? 'rel.' : 'Gy';
 const pctToShown = pct => dose.units === 'rel' ? +pct.toFixed(1) : +(pct / 100 * dose.ref).toFixed(2);
 const shownToPct = v => dose.units === 'rel' ? v : v / dose.ref * 100;
-const unitLabel = () => dose.units === 'rel' ? '%' : 'Gy';
-function levelLabel(pct) { return dose.units === 'rel' ? `${+pct.toFixed(1)}%` : `${fmtGy(pct / 100 * dose.ref)} Gy`; }
+const unitLabel = () => dose.units === 'rel' ? '%' : DU();
+function levelLabel(pct) { return dose.units === 'rel' ? `${+pct.toFixed(1)}%` : `${fmtGy(pct / 100 * dose.ref)} ${DU()}`; }
 
 // ---------- loading ----------
 async function loadDoseFrom(files) {
@@ -39,12 +41,15 @@ async function loadDoseFrom(files) {
     if (dose.mode === 'off') dose.mode = 'wash';
     renderDosePanel(); draw(); busyDone();
     const acc = $('accDose'); if (acc) acc.classList.remove('closed');
+    const dw = [...(info.warnings || [])];
+    if (info.status === 'UNREGISTERED') dw.push(['bad', 'The dose is in a different frame of reference with no registration: it is shown unaligned.']);
+    setChecks('dose', dw, busyBatch);
     return true;
-  } catch (e) { busyDone(true); log('ERROR loading dose: ' + e); console.error(e); return false; }
+  } catch (e) { busyDone(true); reportError('The dose could not be loaded', e); return false; }
 }
 function removeDose() {
   if (doseReady()) py.globals.get('remove_dose')();
-  dose = null; renderDosePanel(); draw();
+  dose = null; setChecks('dose', [], true); renderDosePanel(); draw();
 }
 function doseInvalidate() { if (dose) { dose.planes.clear(); dose.isoCache.clear(); } }
 
@@ -154,7 +159,7 @@ function doseReadout(e) {
   const x = Math.floor(a.x), y = Math.floor(a.y);
   if (x < 0 || y < 0 || x >= g.w || y >= g.h) { el.textContent = ''; return; }
   const v = dosePlane(p, g.idx)[y * g.w + x];
-  el.textContent = v < 0 ? 'Cursor: outside dose grid' : `Cursor: ${fmtGy(v)} Gy (${(v / dose.ref * 100).toFixed(1)}%)`;
+  el.textContent = v < 0 ? 'Cursor: outside dose grid' : `Cursor: ${fmtGy(v)} ${DU()} (${(v / dose.ref * 100).toFixed(1)}%)`;
 }
 
 // ---------- panel ----------
@@ -169,15 +174,15 @@ function renderDosePanel() {
     const I = dose.info, u = unitLabel(), rx = I.rx && I.rx.dose;
     const warn = I.status === 'UNREGISTERED' ? '<div class="bad">Not linked to the primary (different frame of reference, no REG): shown unregistered.</div>' : '';
     el.innerHTML = `${loadRow}
-    <div class="dinfo">${esc(I.sum ? I.sum.toLowerCase() + ' dose' : 'dose')}${I.nFiles > 1 ? ` (${I.nFiles} files summed)` : ''}, max ${fmtGy(I.max)} Gy,
+    <div class="dinfo">${esc(I.sum ? I.sum.toLowerCase() + ' dose' : 'dose')}${I.nFiles > 1 ? ` (${I.nFiles} files summed)` : ''}, max ${fmtGy(I.max)} ${DU()},
       grid ${I.ps[1].toFixed(1)} × ${I.ps[0].toFixed(1)} × ${Math.abs(I.gap).toFixed(1)} mm${rx ? `<br>Prescription ${fmtGy(rx)} Gy${I.rx.fx ? ' in ' + I.rx.fx + ' fractions' : ''} (${esc(I.rx.label || 'RTPLAN')})` : ''}
       ${I.notes.length ? '<br>' + I.notes.map(esc).join(' ') : ''}</div>${warn}
     <div class="drow"><span class="dl">Display</span><span class="seg"><label><input type="radio" name="dMode" value="off" ${dose.mode === 'off' ? 'checked' : ''}>Off</label>
       <label><input type="radio" name="dMode" value="wash" ${dose.mode === 'wash' ? 'checked' : ''}>Colourwash</label>
       <label><input type="radio" name="dMode" value="iso" ${dose.mode === 'iso' ? 'checked' : ''}>Isolines</label></span></div>
-    <div class="drow"><span class="dl">Units</span><span class="seg"><label><input type="radio" name="dUnits" value="abs" ${dose.units === 'abs' ? 'checked' : ''}>Gy</label>
+    <div class="drow"><span class="dl">Units</span><span class="seg"><label><input type="radio" name="dUnits" value="abs" ${dose.units === 'abs' ? 'checked' : ''}>${DU()}</label>
       <label><input type="radio" name="dUnits" value="rel" ${dose.units === 'rel' ? 'checked' : ''}>% of reference</label></span></div>
-    <div class="drow"><span class="dl">Reference</span><input type="number" id="dRef" step="0.01" min="0.01" value="${fmtGy(dose.ref)}"> Gy
+    <div class="drow"><span class="dl">Reference</span><input type="number" id="dRef" step="0.01" min="0.01" value="${fmtGy(dose.ref)}"> ${DU()}
       ${rx ? `<button id="dRefRx" title="Use the prescription from the plan">Rx ${fmtGy(rx)}</button>` : ''}<button id="dRefMax" title="Use the maximum dose">Max ${fmtGy(I.max)}</button></div>
     ${dose.mode === 'wash' ? `<div class="drow"><span class="dl">Range (${u})</span><input type="number" id="dLo" step="any" value="${pctToShown(dose.wash.lo)}" title="Lower dose"> to <input type="number" id="dHi" step="any" value="${pctToShown(dose.wash.hi)}" title="Upper dose"></div>
       <div class="drow"><span class="dl">Opacity</span><input type="range" id="dAlpha" min="0.1" max="0.9" step="0.05" value="${dose.alpha}" style="width:120px"></div>` : ''}

@@ -33,7 +33,8 @@ function atlasSync() {
   const list = [old.pri || {key: 'pri', base: 'pri', kind: 'pri', include: true, planes: {ax: true, sag: true, cor: true}, ww: ctW, wl: ctL}];
   atlas.scans.filter(s => s.kind === 'win').forEach(s => list.push(s));
   for (const id of loadedIds())
-    list.push(old[id] || {key: id, base: id, kind: 'sec', include: true, planes: {ax: true, sag: true, cor: true}, ww: secs[id].ww, wl: secs[id].wl});
+    // unregistered scans are not aligned to the CT: left out unless the user includes them
+    list.push(old[id] || {key: id, base: id, kind: 'sec', include: secs[id].status !== 'UNREGISTERED', planes: {ax: true, sag: true, cor: true}, ww: secs[id].ww, wl: secs[id].wl});
   atlas.scans = list;
   // structures: default = currently visible
   rois.forEach(r => { if (!(r.number in atlas.roiOn)) atlas.roiOn[r.number] = r.visible; });
@@ -184,7 +185,7 @@ function atlasRender() {
   ${A.scans.map((s, i) => `<tr>
     <td><input type="checkbox" class="aScan" data-i="${i}" ${s.include ? 'checked' : ''}></td>
     <td><input type="text" class="aScanName" data-i="${i}" value="${esc(atlasName(s))}" style="width:200px"></td>
-    <td>${s.kind === 'pri' ? 'Primary CT' : s.kind === 'win' ? (s.dose ? 'CT with dose' : 'CT, other window') : (secs[s.key].status === 'UNREGISTERED' ? '<span style="color:#f88">unregistered</span>' : 'registered scan')}</td>
+    <td>${s.kind === 'pri' ? 'Primary CT' : s.kind === 'win' ? (s.dose ? 'CT with dose' : 'CT, other window') : (secs[s.key].status === 'UNREGISTERED' ? '<span class="bad" title="No registration links this scan to the CT">not registered: not aligned</span>' : secs[s.key].deformable ? '<span class="mid" title="Only the rigid part of the deformable registration is applied">registered (rigid part only)</span>' : 'registered scan')}</td>
     <td><input type="number" class="aWW" data-i="${i}" value="${s.ww}"></td><td><input type="number" class="aWL" data-i="${i}" value="${s.wl}"></td>
     <td><input type="checkbox" class="aDose" data-i="${i}" ${s.dose && doseReady() ? 'checked' : ''} ${doseReady() ? '' : 'disabled'}></td>
     ${APLANES.map(p => `<td><input type="checkbox" class="aSP" data-i="${i}" data-p="${p}" ${s.planes[p] ? 'checked' : ''}></td>`).join('')}
@@ -193,7 +194,7 @@ function atlasRender() {
   Add the CT in another window: <select id="aWinPreset"><option value="Lung window|1600|-600">Lung 1600/-600</option><option value="Bone window|2000|300">Bone 2000/300</option><option value="Mediastinal window|350|40">Mediastinal 350/40</option><option value="Custom window|400|40">Custom</option></select>
   <button id="aAddWin">+ Add CT window</button>
   &nbsp; <button id="aAddDose" ${doseReady() ? '' : 'disabled'} title="A separate copy of the CT with the dose and contours, in addition to the CT with contours">+ Add CT with dose</button>
-  ${doseReady() ? `<div style="color:#999;margin-top:4px">Dose is drawn as set in the viewer: ${atlasDoseMode() === 'wash' ? 'colourwash' : 'isolines'}, reference ${fmtGy(dose.ref)} Gy, levels in ${dose.units === 'rel' ? '%' : 'Gy'}.${dose.mode === 'off' ? ' (Dose display is off in the viewer, so pages use the isolines.)' : ''}</div>` : '<div style="color:#777;margin-top:4px">No dose loaded.</div>'}
+  ${doseReady() ? `<div style="color:#999;margin-top:4px">Dose is drawn as set in the viewer: ${atlasDoseMode() === 'wash' ? 'colourwash' : 'isolines'}, reference ${fmtGy(dose.ref)} ${DU()}, levels in ${dose.units === 'rel' ? '%' : 'Gy'}.${dose.mode === 'off' ? ' (Dose display is off in the viewer, so pages use the isolines.)' : ''}</div>` : '<div style="color:#777;margin-top:4px">No dose loaded.</div>'}
 
   <h4>Structures</h4>
   <button id="aRoiAll">All</button><button id="aRoiNone">None</button><button id="aRoiVis">Match viewer</button>
@@ -220,6 +221,7 @@ function atlasRender() {
     <button id="aBuild" class="primary">Build PDF</button>
     <button id="aBuildPpt" class="primary">Build PowerPoint</button>
     <select id="aPptLayout" title="PowerPoint slide size"><option value="16x9" ${(A.pptLayout || '16x9') === '16x9' ? 'selected' : ''}>Slides 16:9</option><option value="A4" ${A.pptLayout === 'A4' ? 'selected' : ''}>Slides A4</option></select>
+    <button id="aCancel" style="display:none">Cancel</button>
     <button id="aClose">Close</button>
     <progress id="aProg" value="0" max="1" style="display:none"></progress> <span id="aProgTxt"></span>
   </div></div>`;
@@ -276,6 +278,8 @@ function atlasRender() {
   $('aBuild').onclick = buildAtlas;
   $('aBuildPpt').onclick = buildPptx;
   $('aPptLayout').onchange = e => A.pptLayout = e.target.value;
+  $('aCancel').onclick = () => { if (atlasJob) { atlasJob.cancel = true; $('aCancel').disabled = true; $('aCancel').textContent = 'Cancelling…'; } };
+  if (atlasJob) { atlasUi(true); $('aProg').style.display = ''; $('aProgTxt').textContent = 'Building…'; }
   legendMsg(); initThumbs(); refreshThumbImgs(); atlasCounts();
 }
 function legendMsg() {
@@ -299,11 +303,15 @@ function atlasPlan() {
     if (s.planes[p]) sections.push({s, p, idxs: sliceList(p)});
   return sections;
 }
+function atlasEstimate() {
+  const secs_ = atlasPlan(), pages = secs_.reduce((a, s) => a + s.idxs.length, 0);
+  return {sections: secs_.length, pages, mb: pages * 0.14 * Math.pow(atlas.quality / 1600, 1.6)};
+}
+const fmtMb = mb => mb < 1000 ? mb.toFixed(0) + ' MB' : (mb / 1000).toFixed(1) + ' GB';
 function atlasSummary() {
   const el = $('aSummary'); if (!el) return;
-  const secs_ = atlasPlan(), pages = secs_.reduce((a, s) => a + s.idxs.length, 0);
-  const mb = pages * 0.14 * Math.pow(atlas.quality / 1600, 1.6);
-  el.textContent = `${secs_.length} sections, ${pages} image pages (+ title${atlas.legend.on ? ' + legend' : ''}). Estimated size ≈ ${mb < 1000 ? mb.toFixed(0) + ' MB' : (mb / 1000).toFixed(1) + ' GB'} (PDF; PowerPoint similar).`;
+  const e = atlasEstimate();
+  el.textContent = `${e.sections} sections, ${e.pages} image pages (+ title${atlas.legend.on ? ' + legend' : ''}). Estimated size ≈ ${fmtMb(e.mb)} (PDF; PowerPoint similar).`;
 }
 
 // ---------- VOI editor (three thumbnails, box of the plane being edited) ----------
@@ -535,15 +543,96 @@ function renderAtlasImage(s, p, idx, W, H, opts) {
   if (opts && opts.noLabels) return {cv, present, g, sx, sy};
   // orientation labels
   const fs = Math.round(W / 70);
+  // registration warning on the image itself, so it survives in the PDF and the PowerPoint
+  const st = s.kind === 'sec' && secs[s.key];
+  const warnTxt = !st ? '' : st.status === 'UNREGISTERED' ? 'NOT REGISTERED: this scan is not aligned to the planning CT'
+                : st.deformable ? 'Rigid part of a deformable registration: alignment is approximate' : '';
+  if (warnTxt) {
+    const f2 = Math.round(W / 62);
+    ctx.font = `bold ${f2}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const tw = ctx.measureText(warnTxt).width;
+    ctx.fillStyle = 'rgba(0,0,0,.78)'; ctx.fillRect((W - tw) / 2 - f2 * .6, fs * 1.9, tw + f2 * 1.2, f2 * 1.7);
+    ctx.fillStyle = st.status === 'UNREGISTERED' ? '#ff5050' : '#ffb340'; ctx.fillText(warnTxt, W / 2, fs * 1.9 + f2 * .85);
+  }
   ctx.font = `${fs}px system-ui, sans-serif`; ctx.fillStyle = '#ff0'; ctx.textBaseline = 'middle';
-  const lab = p === 'ax' ? ['R', 'L', 'A', 'P'] : p === 'sag' ? ['A', 'P', 'S', 'I'] : ['R', 'L', 'S', 'I'];
+  const lab = planeLabels(p);
   ctx.textAlign = 'left'; ctx.fillText(lab[0], fs * .5, H / 2);
   ctx.textAlign = 'right'; ctx.fillText(lab[1], W - fs * .5, H / 2);
   ctx.textAlign = 'center'; ctx.fillText(lab[2], W / 2, fs); ctx.fillText(lab[3], W / 2, H - fs);
   ctx.textAlign = 'left';
   return {cv, present, g, sx, sy};
 }
-const canvasJpeg = cv => new Promise(res => cv.toBlob(b => b.arrayBuffer().then(a => res(new Uint8Array(a))), 'image/jpeg', 0.9));
+// JPEG bytes of a canvas; fails (rather than hanging) if the browser cannot encode it
+const canvasJpeg = cv => new Promise((res, rej) => {
+  let done = false;
+  const fail = m => { if (!done) { done = true; rej(new Error(m)); } };
+  const tmo = setTimeout(() => fail('Encoding a page image timed out. Try a lower image resolution.'), 60000);
+  try {
+    cv.toBlob(b => {
+      clearTimeout(tmo);
+      if (!b) return fail('The browser could not encode a page image (it may be too large). Try a lower image resolution.');
+      b.arrayBuffer().then(a => { if (!done) { done = true; res(new Uint8Array(a)); } }, e => fail(String(e)));
+    }, 'image/jpeg', 0.9);
+  } catch (e) { clearTimeout(tmo); fail(String(e)); }
+});
+// ---------- build jobs: one at a time, cancellable, size check first ----------
+class AtlasCancelled extends Error {}
+let atlasJob = null;
+function atlasUi(on) {
+  ['aBuild', 'aBuildPpt'].forEach(id => { if ($(id)) $(id).disabled = on; });
+  if ($('aCancel')) { $('aCancel').style.display = on ? '' : 'none'; $('aCancel').disabled = false; $('aCancel').textContent = 'Cancel'; }
+}
+async function atlasTick(job, here, total, t0, what) {
+  $('aProg').max = total; $('aProg').value = here;
+  if (here % 3 === 0 || here === total) {
+    const el = (performance.now() - t0) / 1000, rate = Math.max(1e-6, (here - 1) / el);
+    $('aProgTxt').textContent = `${what} ${here} / ${total}, ~${Math.max(0, Math.round((total - here) / rate))} s left`;
+  }
+  await new Promise(r => setTimeout(r));          // let the page repaint and the Cancel button work
+  if (job.cancel) throw new AtlasCancelled();
+}
+async function runAtlasJob(kind, fn) {
+  if (atlasJob) return;
+  const e = atlasEstimate();
+  if (!e.pages) { $('aProgTxt').textContent = 'Nothing selected: include at least one scan and plane.'; return; }
+  if ((e.mb > 1500 || e.pages > 1500) &&
+      !confirm(`This ${kind} has ${e.pages} image pages (about ${fmtMb(e.mb)}). Files this large may fail or make the browser run out of memory. ` +
+               'Reduce the slices (every Nth slice), the planes or the resolution to make it smaller.\n\nBuild it anyway?')) return;
+  const job = atlasJob = {cancel: false};
+  atlasUi(true);
+  $('aProg').style.display = ''; $('aProg').value = 0; $('aProgTxt').textContent = 'Starting…';
+  try { await fn(job); }
+  catch (err) {
+    if (err instanceof AtlasCancelled) { $('aProgTxt').textContent = 'Cancelled: no file was saved.'; log(`${kind} build cancelled.`); }
+    else { $('aProgTxt').textContent = 'Failed: ' + errText(err); reportError(`The ${kind} could not be built`, err); }
+  } finally { atlasJob = null; atlasUi(false); }
+}
+// Unicode font for the PDF (the built-in Helvetica cannot show ≥, ≤, α/β, → and similar)
+let pdfFonts = null;
+async function loadPdfFonts() {
+  if (pdfFonts) return pdfFonts;
+  const get = async f => {
+    const r = await fetch('vendor/fonts/' + f);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const b = new Uint8Array(await r.arrayBuffer()); let s = '';
+    for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000));
+    return btoa(s);
+  };
+  pdfFonts = {regular: await get('LiberationSans-Regular-subset.ttf'), bold: await get('LiberationSans-Bold-subset.ttf')};
+  return pdfFonts;
+}
+async function pdfFont(doc) {
+  try {
+    const f = await loadPdfFonts();
+    doc.addFileToVFS('LiberationSans-Regular.ttf', f.regular); doc.addFont('LiberationSans-Regular.ttf', 'LiberationSans', 'normal');
+    doc.addFileToVFS('LiberationSans-Bold.ttf', f.bold); doc.addFont('LiberationSans-Bold.ttf', 'LiberationSans', 'bold');
+    return 'LiberationSans';
+  } catch (e) {
+    log('PDF font could not be loaded, using Helvetica (symbols such as ≥ may not print): ' + e);
+    toast('The PDF font could not be loaded: symbols such as ≥ or α may not print correctly.', 'warn');
+    return 'helvetica';
+  }
+}
 function slicePosLabel(p, idx) {
   const A = meta.A;
   if (!A) return '';
@@ -600,12 +689,13 @@ function doseTwin(sec, sections) {
   return pick.find(x => x.s.kind === 'pri') || pick.find(x => x.s.kind !== 'win' || x.s.dose) || pick[0];
 }
 // ---------- PDF ----------
-async function buildAtlas() {
+const buildAtlas = () => runAtlasJob('PDF', buildAtlasJob);
+async function buildAtlasJob(job) {
   const A = atlas;
   const sections = atlasPlan();
-  if (!sections.length) { $('aProgTxt').textContent = 'Nothing selected.'; return; }
   const {jsPDF} = window.jspdf;
   const doc = new jsPDF({unit: 'mm', format: 'a4', orientation: 'landscape', compress: true});
+  const PF = await pdfFont(doc);
   const title = A.title.trim() || 'Contouring atlas';
   const incRois = rois.filter(r => A.roiOn[r.number]);
   const legendRois = incRois.filter(r => !A.legend.onlyDescribed || (A.legend.desc[r.number] || '').trim());
@@ -614,7 +704,7 @@ async function buildAtlas() {
   // ---- layout of legend pages (pre-measured so page numbers are known up front) ----
   const legendPages = [];
   if (A.legend.on && legendRois.length) {
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+    doc.setFont(PF, 'normal'); doc.setFontSize(10);
     let page = [], y = 30;
     for (const r of legendRois) {
       const lines = doc.splitTextToSize((A.legend.desc[r.number] || '').trim() || '-', 195);
@@ -642,7 +732,7 @@ async function buildAtlas() {
   const bg = (w, h) => { doc.setFillColor(...BG); doc.rect(0, 0, w, h, 'F'); };
   // button: returns its width; link if a target page is given and it's not the current one
   const btn = (x, y, label, target, active, alignRight) => {
-    doc.setFontSize(8); doc.setFont('helvetica', active ? 'bold' : 'normal');
+    doc.setFontSize(8); doc.setFont(PF, active ? 'bold' : 'normal');
     const w = doc.getTextWidth(label) + 5, h = 5.6, bx = alignRight ? x - w : x;
     const enabled = target != null;
     doc.setFillColor(...(active ? ACC : enabled ? [55, 55, 55] : [32, 32, 32]));
@@ -658,16 +748,16 @@ async function buildAtlas() {
   {
     const W = PG.W, H = PG.H; bg(W, H);
     doc.addImage(backdrop, 'JPEG', 0, 0, W, H, 'title_bg', 'NONE');
-    doc.setTextColor(...FG); doc.setFont('helvetica', 'bold'); doc.setFontSize(26);
+    doc.setTextColor(...FG); doc.setFont(PF, 'bold'); doc.setFontSize(26);
     const tl = doc.splitTextToSize(title, 250);
     doc.text(tl, 20, 30);
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(12); doc.setTextColor(...DIM);
+    doc.setFont(PF, 'normal'); doc.setFontSize(12); doc.setTextColor(...DIM);
     let y = 30 + tl.length * 11;
     const meta_ = [A.creator.trim() ? 'Created by ' + A.creator.trim() : null,
                    new Date().toLocaleDateString(undefined, {year: 'numeric', month: 'long', day: 'numeric'})].filter(Boolean);
     doc.text(meta_.join('   |   '), 20, y); y += 12;
-    doc.setTextColor(...FG); doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.text('Contents', 20, y); y += 8;
-    doc.setFontSize(10.5); doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...FG); doc.setFont(PF, 'bold'); doc.setFontSize(14); doc.text('Contents', 20, y); y += 8;
+    doc.setFontSize(10.5); doc.setFont(PF, 'normal');
     const top = y, bottom = H - 26, colW = 120, cols = [20, 20 + colW + 15];
     let col = 0;
     const need = h => { if (y + h > bottom && col === 0) { col = 1; y = top; } };
@@ -681,7 +771,7 @@ async function buildAtlas() {
     let lastScan = null;
     for (const sec of sections) {
       if (sec.s.key !== lastScan) {
-        need(14); y += 2; doc.setFont('helvetica', 'bold'); doc.setTextColor(...FG); doc.text(atlasName(sec.s), cols[col], y); y += 6; doc.setFont('helvetica', 'normal');
+        need(14); y += 2; doc.setFont(PF, 'bold'); doc.setTextColor(...FG); doc.text(atlasName(sec.s), cols[col], y); y += 6; doc.setFont(PF, 'normal');
         lastScan = sec.s.key;
       }
       row(`${PNAME[sec.p]} (${sec.idxs.length} pages, every ${spacingMm(sec.p).toFixed(1)} mm${noteSlices(sec.p).length ? ' + annotated slices' : ''})`, sec.first, 6);
@@ -691,34 +781,34 @@ async function buildAtlas() {
     doc.text(`${incRois.length} structures, ${nNotes} annotated slice${nNotes === 1 ? '' : 's'}, ${total} pages.  Navigation: each page links to the same slice on the other scans, the other planes,`, 20, H - 16);
     doc.text('the previous/next slice and, where present, the previous/next annotated slice.', 20, H - 11.5);
     // attribution
-    doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(...DIM);
+    doc.setFontSize(8); doc.setFont(PF, 'normal'); doc.setTextColor(...DIM);
     const wm1 = 'Created with ', wm2 = 'TapAtlas';
-    doc.setFont('helvetica', 'bold'); const w2 = doc.getTextWidth(wm2); doc.setFont('helvetica', 'normal'); const w1 = doc.getTextWidth(wm1);
+    doc.setFont(PF, 'bold'); const w2 = doc.getTextWidth(wm2); doc.setFont(PF, 'normal'); const w1 = doc.getTextWidth(wm1);
     const wx = W - 14 - w1 - w2;
-    doc.text(wm1, wx, 12); doc.setFont('helvetica', 'bold'); doc.setTextColor(...ACC); doc.text(wm2, wx + w1, 12);
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); doc.setTextColor(...DIM);
+    doc.text(wm1, wx, 12); doc.setFont(PF, 'bold'); doc.setTextColor(...ACC); doc.text(wm2, wx + w1, 12);
+    doc.setFont(PF, 'normal'); doc.setFontSize(6.5); doc.setTextColor(...DIM);
     doc.text('The Radiotherapy Contour Atlas Generator', W - 14, 15.5, {align: 'right'});
     doc.link(wx - 1, 8.5, W - 14 - wx + 1, 8.5, {url: TAPATLAS_URL});
   }
   // ---- legend pages ----
   legendPages.forEach((items, li) => {
     doc.addPage('a4', 'landscape'); bg(PG.W, PG.H);
-    doc.setTextColor(...FG); doc.setFont('helvetica', 'bold'); doc.setFontSize(16);
+    doc.setTextColor(...FG); doc.setFont(PF, 'bold'); doc.setFontSize(16);
     doc.text('Legend' + (legendPages.length > 1 ? ` (${li + 1}/${legendPages.length})` : ''), 20, 20);
     btn(PG.W - 20, 12, 'Contents', 1, false, true);
     for (const it of items) {
       doc.setFillColor(...it.r.color); doc.rect(20, it.y - 3.2, 4, 4, 'F');
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...FG);
+      doc.setFont(PF, 'bold'); doc.setFontSize(10); doc.setTextColor(...FG);
       doc.text(doc.splitTextToSize(it.r.name, 50), 27, it.y);
-      doc.setFont('helvetica', 'normal'); doc.setTextColor(200, 200, 200);
+      doc.setFont(PF, 'normal'); doc.setTextColor(200, 200, 200);
       doc.text(it.lines, 82, it.y);
     }
   });
 
   // ---- image pages ----
-  $('aProg').style.display = ''; $('aProg').max = total; $('aBuild').disabled = $('aBuildPpt').disabled = true;
+  $('aProg').max = total;
   const t0 = performance.now();
-  try {
+  {
     for (const sec of sections) {
       const {s, p, idxs} = sec, g = geomVoi(p, A.voi[p]);
       // A4 landscape throughout
@@ -733,9 +823,9 @@ async function buildAtlas() {
         const {cv, present} = renderAtlasImage(s, p, idx, Wpx, Hpx);
         doc.addImage(await canvasJpeg(cv), 'JPEG', ix, iy, iw, ih, 'im' + here, 'NONE');
         // header line 1
-        doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...FG);
+        doc.setFont(PF, 'bold'); doc.setFontSize(10); doc.setTextColor(...FG);
         doc.text(doc.splitTextToSize(title, PW * 0.45)[0], M, 6.5);
-        doc.setFont('helvetica', 'normal'); doc.setTextColor(...ACC);
+        doc.setFont(PF, 'normal'); doc.setTextColor(...ACC);
         doc.text(`${atlasName(s)}  |  ${PNAME[p]} ${j + 1}/${idxs.length}  |  ${slicePosLabel(p, idx)}`, PW - M, 6.5, {align: 'right'});
         // header line 2: same slice on other scans | other planes of this scan
         let x = M;
@@ -751,7 +841,7 @@ async function buildAtlas() {
         }
         // footer: structure key, then navigation
         const fy = PH - FOOT + 2;
-        doc.setFontSize(7.5); doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7.5); doc.setFont(PF, 'normal');
         let kx = M;
         // dose key goes on the right, structures fill the rest of the line
         let dxr = PW - M;
@@ -786,12 +876,7 @@ async function buildAtlas() {
           bx += btn(bx, ny, 'Next note >', next ?? null, false) + 1.5;
         }
         doc.setFontSize(8); doc.setTextColor(...DIM); doc.text(`p. ${here} / ${total}`, PW - M, ny + 3.9, {align: 'right'});
-        $('aProg').value = here;
-        if (here % 5 === 0) {
-          const el = (performance.now() - t0) / 1000, rate = (here - 1) / el;
-          $('aProgTxt').textContent = `page ${here} / ${total}, ~${Math.max(0, Math.round((total - here) / rate))} s left`;
-          await new Promise(r => setTimeout(r));
-        }
+        await atlasTick(job, here, total, t0, 'page');
       }
     }
     $('aProgTxt').textContent = 'Writing PDF…';
@@ -800,19 +885,17 @@ async function buildAtlas() {
     doc.save(fname);
     $('aProgTxt').textContent = `Done: ${total} pages in ${((performance.now() - t0) / 1000).toFixed(0)} s, saved as ${fname}`;
     log(`Atlas built: ${total} pages, ${notePages.length} annotated, ${fname}`);
-  } catch (e) {
-    $('aProgTxt').textContent = 'ERROR: ' + e; log('ERROR building atlas: ' + e); console.error(e);
-  } finally { $('aBuild').disabled = $('aBuildPpt').disabled = false; }
+  }
 }
 
 // ---------- PowerPoint ----------
 // Same structure as the PDF. Images carry the scan + contours; notes are native PowerPoint shapes
 // (dot, leader line, text box) so they stay editable, and their text is also put in the speaker notes.
 const PPT_LAYOUTS = {'16x9': {W: 13.333, H: 7.5}, 'A4': {W: 11.69, H: 8.27}};
-async function buildPptx() {
+const buildPptx = () => runAtlasJob('PowerPoint', buildPptxJob);
+async function buildPptxJob(job) {
   const A = atlas;
   const sections = atlasPlan();
-  if (!sections.length) { $('aProgTxt').textContent = 'Nothing selected.'; return; }
   const L = PPT_LAYOUTS[A.pptLayout || '16x9'];
   const pptx = new PptxGenJS();
   pptx.defineLayout({name: 'ATLAS', width: L.W, height: L.H}); pptx.layout = 'ATLAS';
@@ -846,11 +929,15 @@ async function buildPptx() {
     slide.addText(label, o);
     return w;
   };
-  const dataUrl = cv => cv.toDataURL('image/jpeg', 0.9).replace(/^data:/, '');
+  const dataUrl = cv => {
+    const u = cv.toDataURL('image/jpeg', 0.9);
+    if (!/^data:image\/jpeg;base64,/.test(u) || u.length < 200) throw new Error('The browser could not encode a slide image (it may be too large). Try a lower image resolution.');
+    return u.replace(/^data:/, '');
+  };
 
-  $('aProg').style.display = ''; $('aProg').max = total; $('aBuild').disabled = $('aBuildPpt').disabled = true;
+  $('aProg').max = total;
   const t0 = performance.now();
-  try {
+  {
     // ---- title slide ----
     {
       const s = pptx.addSlide(); s.background = {color: BG};
@@ -967,12 +1054,7 @@ async function buildPptx() {
           bx += btn(s, bx, ny, 'Next note >', next ?? null, false) + 0.06;
         }
         s.addText(`${here} / ${total}`, {x: L.W - M - 1.2, y: ny, w: 1.2, h: 0.26, fontFace: FONT, fontSize: 9, color: DIM, align: 'right', valign: 'middle', margin: 0});
-        $('aProg').value = here;
-        if (here % 5 === 0) {
-          const el = (performance.now() - t0) / 1000, rate = (here - 1) / el;
-          $('aProgTxt').textContent = `slide ${here} / ${total}, ~${Math.max(0, Math.round((total - here) / rate))} s left`;
-          await new Promise(r => setTimeout(r));
-        }
+        await atlasTick(job, here, total, t0, 'slide');
       }
     }
     $('aProgTxt').textContent = 'Writing PowerPoint…';
@@ -981,9 +1063,7 @@ async function buildPptx() {
     await pptx.writeFile({fileName: fname, compression: true});
     $('aProgTxt').textContent = `Done: ${total} slides in ${((performance.now() - t0) / 1000).toFixed(0)} s, saved as ${fname}`;
     log(`Atlas PowerPoint built: ${total} slides, ${fname}`);
-  } catch (e) {
-    $('aProgTxt').textContent = 'ERROR: ' + e; log('ERROR building PowerPoint: ' + e); console.error(e);
-  } finally { $('aBuild').disabled = $('aBuildPpt').disabled = false; }
+  }
 }
 
 // a note marker as native PowerPoint shapes (m: noteMarkerGeom in output px; X/Y: px -> inches)
