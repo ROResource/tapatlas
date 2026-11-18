@@ -201,6 +201,8 @@ function atlasRender() {
   <div class="roiGrid" style="margin-top:4px">${rois.map(r => `<label><input type="checkbox" class="aRoi" data-n="${r.number}" ${A.roiOn[r.number] ? 'checked' : ''}>
     <span class="sw" style="background:rgb(${r.color})"></span>${esc(r.name)}</label>`).join('')}</div>
 
+  <label style="display:block;margin-top:8px"><input type="checkbox" id="aSmooth" ${smoothOutlines ? 'checked' : ''}> Smooth sagittal/coronal outlines between axial slices (same setting as the viewer)</label>
+
   <h4>Notes</h4>
   <label><input type="checkbox" id="aNotes" ${A.notesOn ? 'checked' : ''}> Include notes (${notes.length} in total)</label>
 
@@ -270,6 +272,7 @@ function atlasRender() {
   $('aRoiAll').onclick = () => setRois(() => true); $('aRoiNone').onclick = () => setRois(() => false); $('aRoiVis').onclick = () => setRois(r => r.visible);
   q('.aRoi').forEach(x => x.onchange = e => { A.roiOn[+e.target.dataset.n] = e.target.checked; atlasRender(); });  // re-renders thumbs + legend
   $('aNotes').onchange = e => { A.notesOn = e.target.checked; atlasCounts(); };
+  $('aSmooth').onchange = e => { smoothOutlines = e.target.checked; $('smooth').checked = smoothOutlines; };
   $('aLeg').onchange = e => { A.legend.on = e.target.checked; $('aLegBox').style.display = A.legend.on ? 'block' : 'none'; legendMsg(); atlasSummary(); };
   $('aLegOnly').onchange = e => { A.legend.onlyDescribed = e.target.checked; };
   q('.aDesc').forEach(x => x.oninput = e => { A.legend.desc[+e.target.dataset.n] = e.target.value; e.target.classList.toggle('empty', !e.target.value.trim()); legendMsg(); });

@@ -1661,17 +1661,16 @@ function syncSlider() {
   $('slice').min = g.min; $('slice').max = g.max; $('slice').value = g.idx;
 }
 
-// Structure outline in a sagittal/coronal plane: rasterise each axial contour's crossings with the
-// plane line (even-odd), then trace the resulting 2D mask with d3.contours.
-function reslicedOutline(r, p, idx, g) {
-  if (!r.ks.length) return null;
-  const n = meta.n, W = g.w;
-  const kmin = r.ks[0], kmax = r.ks[r.ks.length - 1];
-  const y0 = (n - 1) - kmax, y1 = (n - 1) - kmin;
-  const bh = y1 - y0 + 3;
-  const grid = new Float32Array(W * bh);
-  let any = false;
-  const L = idx;
+// Structure outline in a sagittal/coronal plane. Each axial contour is cut by the plane line, giving
+// spans (inside intervals) on that slice. Default: the spans fill one slice row each and the outline is
+// traced from that mask (a staircase: each contour stands for its whole slice). Smoothed: spans that
+// overlap on neighbouring slices are joined by linear interpolation between the slice centres (at most
+// half a slice spacing head-foot from the staircase); spans with no overlapping partner, and the first and
+// last contoured slices, keep their square half-slice ends, so separate pieces are never bridged.
+let smoothOutlines = false;
+const SMOOTH_SUB = 4;                      // sub-rows per slice for the smoothed outline
+function sliceSpans(r, p, L) {
+  const out = new Map();                   // slice k -> [[a, b], ...] sorted, in plane pixel-centre coords
   for (const k of r.ks) {
     const xs = [];
     for (const poly of r.slices[k]) {
@@ -1684,9 +1683,33 @@ function reslicedOutline(r, p, idx, g) {
     }
     if (xs.length < 2) continue;
     xs.sort((a, b) => a - b);
+    const sp = [];
+    for (let j = 0; j + 1 < xs.length; j += 2) sp.push([xs[j], xs[j + 1]]);
+    out.set(k, sp);
+  }
+  return out;
+}
+function reslicedOutline(r, p, idx, g) {
+  if (!r.ks.length) return null;
+  const key = `${p}|${idx}|${g.w}|${smoothOutlines ? 1 : 0}`;
+  const cache = r._oc || (r._oc = new Map());
+  if (cache.has(key)) return cache.get(key);
+  const res = smoothOutlines ? smoothOutline(r, p, idx, g) : stairOutline(r, p, idx, g);
+  if (cache.size > 120) cache.clear();
+  cache.set(key, res);
+  return res;
+}
+function stairOutline(r, p, idx, g) {
+  const n = meta.n, W = g.w;
+  const kmin = r.ks[0], kmax = r.ks[r.ks.length - 1];
+  const y0 = (n - 1) - kmax, y1 = (n - 1) - kmin;
+  const bh = y1 - y0 + 3;
+  const grid = new Float32Array(W * bh);
+  let any = false;
+  for (const [k, sp] of sliceSpans(r, p, idx)) {
     const row = ((n - 1) - k) - y0 + 1;
-    for (let j = 0; j + 1 < xs.length; j += 2) {
-      const a = Math.max(0, Math.ceil(xs[j])), b = Math.min(W - 1, Math.floor(xs[j + 1]));
+    for (const [xa, xb] of sp) {
+      const a = Math.max(0, Math.ceil(xa)), b = Math.min(W - 1, Math.floor(xb));
       for (let x = a; x <= b; x++) { grid[row * W + x] = 1; any = true; }
     }
   }
@@ -1694,12 +1717,49 @@ function reslicedOutline(r, p, idx, g) {
   const mp = d3.contours().size([W, bh]).thresholds([0.5])(grid)[0];
   return {mp, yoff: y0 - 1};
 }
+function smoothOutline(r, p, idx, g) {
+  const n = meta.n, S = SMOOTH_SUB, spans = sliceSpans(r, p, idx);
+  if (!spans.size) return null;
+  let xmin = Infinity, xmax = -Infinity;
+  for (const sp of spans.values()) for (const [a, b] of sp) { xmin = Math.min(xmin, a); xmax = Math.max(xmax, b); }
+  const kmin = Math.min(...spans.keys()), kmax = Math.max(...spans.keys());
+  const x0 = Math.floor(xmin) - 2, W = Math.ceil(xmax) - x0 + 3;          // grid columns: plane x = x0 + col
+  const y0 = (n - 1) - kmax - 1, H = (kmax - kmin + 3) * S;               // grid rows: plane y = y0 + row / S
+  const grid = new Float32Array(W * H);
+  const overlaps = (s, u) => s[0] <= u[1] && u[0] <= s[1];
+  for (let row = 0; row < H; row++) {
+    // continuous slice position of this sub-row's centre (slice k's centre sits at plane y = n - 1 - k + 0.5)
+    const kc = n - 0.5 - (y0 + (row + 0.5) / S);
+    const klo = Math.floor(kc), t = kc - klo;
+    const A = spans.get(klo) || [], B = spans.get(klo + 1) || [];
+    const cur = [];
+    for (const s of A) {
+      const part = B.filter(u => overlaps(s, u));
+      if (part.length) for (const u of part) cur.push([s[0] + (u[0] - s[0]) * t, s[1] + (u[1] - s[1]) * t]);
+      else if (t < 0.5) cur.push(s);                 // no partner above: square half-slice end
+    }
+    for (const u of B) if (t >= 0.5 && !A.some(s => overlaps(s, u))) cur.push(u);   // no partner below
+    for (const [a, b] of cur) {
+      const ca = Math.max(0, Math.floor(a - x0 - 0.5)), cb = Math.min(W - 1, Math.ceil(b - x0 + 0.5));
+      for (let c = ca; c <= cb; c++) {
+        const x = x0 + c, v = Math.min(b, x + 0.5) - Math.max(a, x - 0.5);   // fraction of the pixel inside
+        if (v > grid[row * W + c]) grid[row * W + c] = Math.min(1, v);
+      }
+    }
+  }
+  const mp = d3.contours().size([W, H]).thresholds([0.5])(grid)[0];
+  if (!mp.coordinates.length) return null;
+  // grid -> plane pixel-edge coordinates (same convention as the staircase outline, with yoff = 0)
+  for (const poly of mp.coordinates) for (const ring of poly) for (const pt of ring) { pt[0] = pt[0] + x0; pt[1] = y0 + pt[1] / S; }
+  return {mp, yoff: 0};
+}
 
 function draw(overlay) {
   if (!meta) return;
   const p = radio('plane'), g = planeGeom(p);
   const which = secs[current] && secs[current].loaded ? current : 'pri';
   const {ww, wl} = winOf(which);
+  $('smoothWrap').style.display = p === 'ax' ? 'none' : '';
   const ikey = `${imgGen}|${p}|${g.idx}|${ww}|${wl}|${which}|${g.w}x${g.h}`;
   if (viewImg.key !== ikey) {          // only ask Python for a new plane when something changed
     const proxy = py.globals.get('plane_rgba')(p, g.idx, ww, wl, which);
@@ -1814,6 +1874,7 @@ $('cv').addEventListener('click', e => {
 });
 $('slice').oninput = e => { setIdx(radio('plane'), +e.target.value); draw(); renderNotesPanel(); };
 $('xhair').onchange = () => draw();
+$('smooth').onchange = e => { smoothOutlines = e.target.checked; draw(); };
 document.querySelectorAll('input[name=plane]').forEach(r => r.onchange = () => { syncSlider(); draw(); });
 window.addEventListener('resize', () => draw());
 document.addEventListener('keydown', e => {

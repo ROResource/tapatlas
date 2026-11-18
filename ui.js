@@ -144,7 +144,7 @@ function sessionState() {
     priName, priWin: {ww: priWin.ww, wl: priWin.wl, sel: priWin.sel}, lineWidth,
     secs: Object.fromEntries(loadedIds().map(id => [id, {label: secs[id].label, ww: secs[id].ww, wl: secs[id].wl, sel: secs[id].sel}])),
     rois: rois.map(r => ({number: r.number, origName: r.origName, name: r.name, color: r.color, visible: r.visible, lw: r.lw})),
-    crop, noteSeq,
+    crop, noteSeq, smoothOutlines,
     notes: notes.filter(n => n !== pending).map(n => ({id: n.id, scan: n.scan, home: n.home, pt: n.pt, text: n.text, views: n.views})),
     dose: doseReady() ? {ref: dose.ref, units: dose.units, mode: dose.mode, alpha: dose.alpha, wash: dose.wash, iso: dose.iso} : null,
     atlas: atlas ? JSON.parse(JSON.stringify(atlas)) : null,
@@ -190,6 +190,7 @@ async function openSession(file) {
     noteEls.clear(); pending = null; activeNote = null; noteMode = null; closeMkMenu();
     notes = (S.notes || []).filter(n => n && n.pt && n.views && n.home).map(n => ({...n, text: String(n.text || '')}));
     noteSeq = Math.max(S.noteSeq || 1, ...notes.map(n => n.id + 1), 1);
+    if (typeof S.smoothOutlines === 'boolean') { smoothOutlines = S.smoothOutlines; $('smooth').checked = smoothOutlines; }
     if (S.crop) setCrop(S.crop, 'From session');
     if (S.dose && doseReady()) { Object.assign(dose, S.dose); doseInvalidate(); }
     if (S.atlas) { atlas = S.atlas; projCache = {key: '', cv: {}}; }
