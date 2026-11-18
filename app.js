@@ -1829,6 +1829,9 @@ document.addEventListener('keydown', e => {
 $('cv').addEventListener('wheel', e => {
   e.preventDefault(); if (!meta) return;
   const p = radio('plane'), g = planeGeom(p);
-  setIdx(p, Math.max(g.min, Math.min(g.max, g.idx + (e.deltaY > 0 ? 1 : -1))));
+  // axial: scrolling down moves head -> toe (slice index increases towards the head)
+  const headUp = p === 'ax' && meta.dirs && meta.dirs.normal[2] > 0.5;
+  const step = (e.deltaY > 0 ? 1 : -1) * (headUp ? -1 : 1);
+  setIdx(p, Math.max(g.min, Math.min(g.max, g.idx + step)));
   syncSlider(); draw();
 }, {passive: false});
