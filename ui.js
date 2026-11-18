@@ -122,15 +122,32 @@ function uiReset() {
 }
 
 // ---------- data checks panel ----------
+// Each item can be dismissed (×); dismissed items are hidden and not counted, and can be shown again.
 function renderChecks() {
   const el = $('checksList'); if (!el) return;
   const order = {bad: 0, warn: 1, info: 2};
   const all = Object.values(checks).flat().sort((a, b) => order[a.level] - order[b.level]);
-  const n = all.filter(c => c.level !== 'info').length;
+  const live = all.filter(c => !dismissedChecks.has(c.text)), gone = all.filter(c => dismissedChecks.has(c.text));
+  const n = live.filter(c => c.level !== 'info').length;
   $('cntChecks').textContent = n ? String(n) : '';
-  $('cntChecks').className = 'cnt ' + (all.some(c => c.level === 'bad') ? 'bad' : n ? 'mid' : '');
-  el.innerHTML = all.length ? all.map(c => `<div class="chk ${c.level}">${esc(c.text)}</div>`).join('')
-                            : '<small class="ok">No problems found with the loaded data.</small>';
+  $('cntChecks').className = 'cnt ' + (live.some(c => c.level === 'bad') ? 'bad' : n ? 'mid' : '');
+  const item = (c, dismissed) => `<div class="chk ${c.level}${dismissed ? ' dis' : ''}"><span>${esc(c.text)}</span>` +
+    `<button class="ghost cx" data-t="${esc(c.text)}" title="${dismissed ? 'Show again' : 'Dismiss'}" aria-label="${dismissed ? 'Show again' : 'Dismiss'}">${dismissed ? '↺' : '×'}</button></div>`;
+  let html = live.length ? live.map(c => item(c, false)).join('')
+           : `<small class="ok">${all.length ? 'All checks dismissed.' : 'No problems found with the loaded data.'}</small>`;
+  if (showDismissed) html += gone.map(c => item(c, true)).join('');
+  const links = [];
+  if (live.length > 1) links.push('<button class="ghost cl" id="chkAll">Dismiss all</button>');
+  if (gone.length) links.push(`<button class="ghost cl" id="chkShow">${showDismissed ? 'Hide' : 'Show'} dismissed (${gone.length})</button>`);
+  if (links.length) html += `<div class="chk-links">${links.join('')}</div>`;
+  el.innerHTML = html;
+  el.querySelectorAll('.cx').forEach(b => b.onclick = () => {
+    const t = b.dataset.t;
+    if (dismissedChecks.has(t)) dismissedChecks.delete(t); else dismissedChecks.add(t);
+    renderChecks();
+  });
+  if ($('chkAll')) $('chkAll').onclick = () => { live.forEach(c => dismissedChecks.add(c.text)); renderChecks(); };
+  if ($('chkShow')) $('chkShow').onclick = () => { showDismissed = !showDismissed; renderChecks(); };
 }
 renderChecks();
 

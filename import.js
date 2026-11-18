@@ -205,7 +205,7 @@ async function patLoad() {
     setChecks('folder', failed.map(f => ['bad', `Not loaded: ${f}${/[.)]$/.test(f) ? '' : '.'}`]), true);
     current = 'pri'; buildImgSel(); draw(); renderNotesPanel();
     log(`Patient folder loaded: primary + ${nOk} of ${extras.length} extra scan(s)${dTxt}${failed.length ? `; ${failed.length} item(s) failed` : ''}.`);
-    const nChecks = Object.values(checks).flat().filter(c => c.level !== 'info').length;
+    const nChecks = Object.values(checks).flat().filter(c => c.level !== 'info' && !dismissedChecks.has(c.text)).length;
     const msg = `Loaded ${scanName('pri')}${nOk ? ` + ${nOk} scan${nOk > 1 ? 's' : ''}` : ''}${dTxt}${rois.length ? `, ${rois.length} structure${rois.length > 1 ? 's' : ''}` : ''}.`
       + (failed.length ? ` ${failed.length} item${failed.length > 1 ? 's' : ''} could not be loaded.` : '')
       + (nChecks ? ` ${nChecks} thing${nChecks > 1 ? 's' : ''} to check: see Checks in the side panel.` : '');

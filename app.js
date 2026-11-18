@@ -878,17 +878,23 @@ function reportError(what, e) {
 // ---------- data checks (warnings about the loaded data, shown in the side panel) ----------
 // scope: 'pri' | 's1'..'s4' | 'dose' | 'reg' | 'folder'; level: 'bad' | 'warn' | 'info'
 const checks = {};
+const dismissedChecks = new Set();       // texts the user has dismissed (kept until a new patient is loaded)
+let showDismissed = false;
 function setChecks(scope, list, quiet) {
   const prev = (checks[scope] || []).map(c => c.text).join('|');
   checks[scope] = (list || []).map(([level, text]) => ({level, text}));
   if (typeof renderChecks === 'function') renderChecks();
-  const fresh = checks[scope].filter(c => c.level !== 'info');
+  const fresh = checks[scope].filter(c => c.level !== 'info' && !dismissedChecks.has(c.text));
   if (!quiet && fresh.length && fresh.map(c => c.text).join('|') !== prev) {
     toast(`${fresh.length} thing${fresh.length > 1 ? 's' : ''} to check: see Checks in the side panel.`, 'warn');
     const acc = $('accChecks'); if (acc) acc.classList.remove('closed');
   }
 }
-function clearChecks() { for (const k of Object.keys(checks)) delete checks[k]; if (typeof renderChecks === 'function') renderChecks(); }
+function clearChecks() {
+  for (const k of Object.keys(checks)) delete checks[k];
+  dismissedChecks.clear(); showDismissed = false;
+  if (typeof renderChecks === 'function') renderChecks();
+}
 // ---------- orientation labels from the image direction cosines (patient LPS: +x left, +y posterior, +z head) ----------
 function dirLetters(v) {
   const L = [['R', 'L'], ['A', 'P'], ['I', 'S']], ax = [0, 1, 2].sort((a, b) => Math.abs(v[b]) - Math.abs(v[a]));
